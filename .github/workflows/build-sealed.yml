@@ -14,7 +14,7 @@ permissions:
   packages: write
 
 env:
-  IMAGE: ghcr.io/${{ github.repository_owner }}/fedora-bootc-sealed-os
+  IMAGE: ghcr.io/neret/fedora-bootc-sealed-os
   TOOLS_IMAGE: quay.io/fedora/fedora:45
 
 jobs:
