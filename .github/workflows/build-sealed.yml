@@ -66,7 +66,7 @@ jobs:
           TAG: ${{ needs.build-unsealed.outputs.tag }}
         run: |
           sudo podman build \
-            --pull=never \
+            --pull=missing \
             -f seal/Containerfile.slim \
             --build-arg BASE="${IMAGE}:unsealed-${TAG}" \
             -t localhost/thinkpad-slim:${TAG} \
@@ -111,7 +111,7 @@ jobs:
           echo "image_ref=${IMAGE_REF}" >> "$GITHUB_OUTPUT"
 
           sudo podman build \
-            --pull=never \
+            --pull=missing \
             -f seal/Containerfile.seal \
             --target final \
             -t "${IMAGE_REF}" \
