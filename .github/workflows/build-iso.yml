@@ -1,0 +1,125 @@
+name: Build Sealed Installer ISO
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: write
+
+env:
+  IMAGE: ghcr.io/${{ github.repository_owner }}/thinkpad-gnome-os
+  TOOLS_IMAGE: quay.io/fedora/fedora:45
+
+jobs:
+  build-unsealed:
+    runs-on: ubuntu-latest
+    outputs:
+      tag: ${{ steps.meta.outputs.tag }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set tag
+        id: meta
+        run: echo "tag=sealed-$(date +%Y%m%d%H%M%S)-${GITHUB_SHA::7}" >> "$GITHUB_OUTPUT"
+
+      - name: Build unsealed image
+        env:
+          TAG: ${{ steps.meta.outputs.tag }}
+        run: |
+          sudo podman build \
+            --pull=always \
+            -f seal/Containerfile.unsealed \
+            -t "${IMAGE}:unsealed-${TAG}" \
+            --secret id=key,src=<(echo "${{ secrets.SECUREBOOT_KEY }}") \
+            --secret id=cert,src=<(echo "${{ secrets.SECUREBOOT_CERT }}") \
+            .
+
+      - name: Push unsealed image
+        env:
+          TAG: ${{ steps.meta.outputs.tag }}
+        run: |
+          echo "${{ secrets.GITHUB_TOKEN }}" | sudo podman login ghcr.io -u ${{ github.actor }} --password-stdin
+          sudo podman push "${IMAGE}:unsealed-${TAG}"
+
+  compute-digest:
+    needs: build-unsealed
+    runs-on: ubuntu-latest
+    outputs:
+      digest: ${{ steps.digest.outputs.digest }}
+    steps:
+      - name: Compute composefs digest
+        id: digest
+        env:
+          TAG: ${{ needs.build-unsealed.outputs.tag }}
+        run: |
+          DIGEST="$(sudo podman run --rm \
+            --mount type=image,source=${IMAGE}:unsealed-${TAG},target=/target \
+            ${TOOLS_IMAGE} \
+            bash -c '
+              dnf -y install bootc >/dev/null
+              bootc container compute-composefs-digest /target
+            ' | tail -n1)"
+
+          echo "digest=${DIGEST}" >> "$GITHUB_OUTPUT"
+          echo "Composefs digest: ${DIGEST}"
+
+  build-sealed:
+    needs: [build-unsealed, compute-digest]
+    runs-on: ubuntu-latest
+    outputs:
+      image_ref: ${{ steps.meta.outputs.image_ref }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build sealed image
+        id: meta
+        env:
+          TAG: ${{ needs.build-unsealed.outputs.tag }}
+          DIGEST: ${{ needs.compute-digest.outputs.digest }}
+        run: |
+          IMAGE_REF="${IMAGE}:${TAG}"
+          echo "image_ref=${IMAGE_REF}" >> "$GITHUB_OUTPUT"
+
+          sudo podman build \
+            --pull=never \
+            -f seal/Containerfile.seal \
+            --target final \
+            -t "${IMAGE_REF}" \
+            --secret id=key,src=<(echo "${{ secrets.SECUREBOOT_KEY }}") \
+            --secret id=cert,src=<(echo "${{ secrets.SECUREBOOT_CERT }}") \
+            --build-arg COMPOSEFS_DIGEST="${DIGEST}" \
+            .
+
+      - name: Push sealed image
+        env:
+          TAG: ${{ needs.build-unsealed.outputs.tag }}
+        run: |
+          echo "${{ secrets.GITHUB_TOKEN }}" | sudo podman login ghcr.io -u ${{ github.actor }} --password-stdin
+          sudo podman push "${IMAGE}:${TAG}"
+
+  build-iso:
+    needs: build-sealed
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install mkosi
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y mkosi
+
+      - name: Build installer ISO
+        env:
+          SEALED_IMAGE: ${{ needs.build-sealed.outputs.image_ref }}
+        run: |
+          cd iso
+          echo "${SEALED_IMAGE}" > SEALED_IMAGE
+          mkosi build
+
+      - name: Upload ISO
+        uses: actions/upload-artifact@v4
+        with:
+          name: thinkpad-gnome-os-installer
+          path: iso/mkosi.output/*
+          retention-days: 7

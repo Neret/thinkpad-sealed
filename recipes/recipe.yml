@@ -1,0 +1,40 @@
+# yaml-language-server: $schema=https://schema.blue-build.org/recipe-v1.json
+---
+version: 1
+name: thinkpad-gnome-os
+description: Host GNOME minimale e immutabile per ThinkPad T14s Gen1 AMD
+base-image: quay.io/fedora/fedora-bootc
+image-version: 45
+
+modules:
+  - from-file: packages.yml
+
+  - type: files
+    files:
+      - source: system
+        destination: /
+  - type: gschema-overrides
+    include:
+      - zz0-thinkpad.gschema.override
+
+  - type: script
+    scripts:
+      - assets.sh
+    snippets:
+      - ln -sf /usr/lib/systemd/system/graphical.target /etc/systemd/system/default.target
+
+  - type: systemd
+    system:
+      enabled:
+        - gdm.service
+        - NetworkManager.service
+        - systemd-resolved.service
+        - bluetooth.service
+        - firewalld.service
+      disabled:
+        - irqbalance.service
+        - sshd.service
+
+  - from-file: flatpaks.yml
+
+  - type: signing

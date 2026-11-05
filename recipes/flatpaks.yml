@@ -1,0 +1,34 @@
+---
+type: default-flatpaks@v2
+configurations:
+  - scope: user
+    notify: false
+    repo:
+      url: https://dl.flathub.org/repo/flathub.flatpakrepo
+      name: flathub
+      title: Flathub
+    install:
+      - com.github.tchx84.Flatseal
+      - de.haeckerfelix.Fragments
+      - io.github.flattool.Warehouse
+      - io.github.kolunmi.Bazaar
+      - io.missioncenter.MissionCenter
+      - org.gnome.baobab
+      - org.gnome.Calculator
+      - org.gnome.Calendar
+      - org.gnome.clocks
+      - org.gnome.Contacts
+      - org.gnome.Decibels
+      - org.gnome.FileRoller
+      - org.gnome.Firmware
+      - org.gnome.Logs
+      - org.gnome.Loupe
+      - org.gnome.Maps
+      - org.gnome.Papers
+      - org.gnome.SimpleScan
+      - org.gnome.Snapshot
+      - org.gnome.TextEditor
+      - org.gnome.Weather
+      - org.gnome.World.PikaBackup
+      - org.mozilla.firefox
+      - org.localsend.localsend_app

@@ -1,0 +1,29 @@
+# syntax=docker/dockerfile:1
+ARG BASE=ghcr.io/neret/thinkpad-gnome-os:latest
+ARG TOOLS=quay.io/fedora/fedora:45
+
+FROM ${BASE} AS base
+
+# --- firma di systemd-boot (solo firma, nessuna iscrizione di chiavi) ---
+FROM ${TOOLS} AS signer
+RUN dnf install -y sbsigntools systemd-boot-unsigned && dnf clean all
+RUN --mount=type=secret,id=key \
+    --mount=type=secret,id=cert <<'EOF'
+set -euo pipefail
+mkdir -p /out
+sbsign --key /run/secrets/key --cert /run/secrets/cert \
+  --output /out/systemd-bootx64.efi \
+  /usr/lib/systemd/boot/efi/systemd-bootx64.efi
+EOF
+
+# --- immagine "unsealed": è questa che viene misurata per il digest composefs ---
+FROM base AS unsealed
+COPY --from=signer /out/systemd-bootx64.efi /usr/lib/systemd/boot/efi/systemd-bootx64.efi
+RUN <<'EOF'
+set -euo pipefail
+rpm -e --nodeps bootupd
+kver=$(find /usr/lib/modules -mindepth 1 -maxdepth 1 -type d -printf "%f\n" | sort -V | tail -n1)
+dracut --force --no-hostonly --reproducible --kver "$kver" \
+  "/usr/lib/modules/${kver}/initramfs.img"
+rm -rf /run/dnf /run/selinux-policy
+EOF

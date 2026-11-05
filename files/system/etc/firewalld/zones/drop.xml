@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<zone target="DROP">
+  <short>Drop</short>
+  <description>Scarta tutto il traffico in ingresso, tranne i servizi elencati.</description>
+  <service name="localsend"/>
+</zone>
