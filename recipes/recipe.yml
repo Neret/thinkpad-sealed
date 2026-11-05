@@ -1,7 +1,7 @@
 # yaml-language-server: $schema=https://schema.blue-build.org/recipe-v1.json
 ---
 version: 1
-name: thinkpad-gnome-os
+name: fedora-bootc-sealed-os
 description: Host GNOME minimale e immutabile per ThinkPad T14s Gen1 AMD
 base-image: quay.io/fedora/fedora-bootc
 image-version: 45
