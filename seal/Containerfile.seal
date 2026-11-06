@@ -1,16 +1,19 @@
 # syntax=docker/dockerfile:1
 ARG UNSEALED=ghcr.io/neret/fedora-bootc-sealed-os:unsealed-latest
-ARG TOOLS=quay.io/fedora/fedora:45
 
 FROM ${UNSEALED} AS base
 
-# Stage rootfs: kargs + split kernel/initramfs.
-# Il digest composefs sarà calcolato su QUESTO rootfs,
+# Stage rootfs: pulizia ostree + kargs + split kernel/initramfs.
+# Il digest composefs sarà calcolato su QUESTO albero,
 # che è anche la base della final image: le viste coincidono.
 FROM base AS split
 ARG LUKS_UUID=9c879ac9-f3ad-49d9-bd94-1e98e3096f22
 ARG ROOT_UUID=aecc2955-bf15-4741-9b75-ddc0d7184bdb
 ARG KARGS_EXTRA=""
+
+# Il repository ostree non serve al backend composefs e il suo
+# contenuto/metadati può falsare il digest calcolato sulla directory.
+RUN rm -rf /sysroot/ostree
 
 RUN set -euo pipefail; \
     mkdir -p /usr/lib/bootc/kargs.d; \
@@ -36,7 +39,7 @@ RUN mkdir /kernel && \
 
 # UKI firmata usando il bootc della BASE image:
 # generatore e verificatore del digest usano la stessa versione
-# di bootc/composefs-rs, eliminando il mismatch di formato.
+# di bootc/composefs-rs.
 FROM base AS sealed-uki
 RUN dnf install -y systemd-ukify sbsigntools && dnf clean all
 
@@ -61,12 +64,13 @@ bootc container ukify \
   --secureboot-certificate /run/secrets/cert
 EOF
 
-# Final image: rootfs già splittato + UKI firmata + systemd-boot firmato.
+# Final image: stesso albero su cui è stato calcolato il digest,
+# più la UKI in /boot (che bootc esclude dal composefs).
+# NON rimuovere /kernel: farebbe cambiare l'albero rispetto al digest.
 FROM split AS final
 COPY --from=sealed-uki /out/*.efi /boot/EFI/Linux/
 
 RUN set -euo pipefail; \
-    rm -rf /kernel; \
     mkdir -p /boot/EFI/BOOT /boot/EFI/systemd; \
     cp /usr/lib/systemd/boot/efi/systemd-bootx64.efi /boot/EFI/BOOT/BOOTX64.EFI; \
     cp /usr/lib/systemd/boot/efi/systemd-bootx64.efi /boot/EFI/systemd/systemd-bootx64.efi; \
