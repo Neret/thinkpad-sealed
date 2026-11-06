@@ -4,45 +4,17 @@ ARG TOOLS=quay.io/fedora/fedora:45
 
 FROM ${UNSEALED} AS base
 
-# Rootfs senza kernel/initramfs grezzi: su questo viene calcolato il digest.
-FROM base AS slim
-RUN set -euo pipefail; \
-    kver="$(cd /usr/lib/modules && echo *)"; \
-    test -d "/usr/lib/modules/${kver}"; \
-    rm -f "/usr/lib/modules/${kver}/vmlinuz" "/usr/lib/modules/${kver}/initramfs.img"
-
-FROM ${TOOLS} AS buildroot
-RUN dnf install -y \
-      systemd-ukify \
-      ostree-libs \
-      systemd-udev \
-      sbsigntools \
-      openssl \
-      systemd-boot-unsigned \
-    && dnf clean all
-
-# UKI firmata: il digest composefs è calcolato da bootc container ukify
-# direttamente sul rootfs /target, non dallo storage.
-FROM buildroot AS sealed-uki
+# Stage rootfs: kargs + split kernel/initramfs.
+# Il digest composefs sarà calcolato su QUESTO rootfs,
+# che è anche la base della final image: le viste coincidono.
+FROM base AS split
 ARG LUKS_UUID=9c879ac9-f3ad-49d9-bd94-1e98e3096f22
 ARG ROOT_UUID=aecc2955-bf15-4741-9b75-ddc0d7184bdb
 ARG KARGS_EXTRA=""
 
-# Copia il rootfs in una directory scrivibile: il mount bind da stage è read-only.
-COPY --from=slim / /target
-
-RUN --mount=type=secret,id=key \
-    --mount=type=secret,id=cert \
-    --mount=type=bind,from=base,target=/kernel-src <<'EOF'
-set -euo pipefail
-
-kver=$(find /kernel-src/usr/lib/modules -mindepth 1 -maxdepth 1 -type d -printf '%f\n' | sort -V | tail -n1)
-test -n "${kver}"
-test -f "/kernel-src/usr/lib/modules/${kver}/vmlinuz"
-test -f "/kernel-src/usr/lib/modules/${kver}/initramfs.img"
-
-mkdir -p /target/usr/lib/bootc/kargs.d
-cat > /target/usr/lib/bootc/kargs.d/10-sealed.conf <<KARGS
+RUN set -euo pipefail; \
+    mkdir -p /usr/lib/bootc/kargs.d; \
+    cat > /usr/lib/bootc/kargs.d/10-sealed.conf <<KARGS
 rd.luks.uuid=luks-${LUKS_UUID}
 rd.luks.options=tpm2-device=auto
 root=UUID=${ROOT_UUID}
@@ -57,10 +29,39 @@ zswap.enabled=0
 ${KARGS_EXTRA}
 KARGS
 
+# Sposta vmlinuz/initramfs in /kernel/<kver>/ e li rimuove dal rootfs:
+# finiranno embedded nella UKI.
+RUN mkdir /kernel && \
+    bootc container split-kernel-and-rootfs --rootfs / --output /kernel
+
+FROM ${TOOLS} AS buildroot
+RUN dnf install -y \
+      bootc \
+      ostree-libs \
+      systemd-ukify \
+      systemd-udev \
+      sbsigntools \
+      openssl \
+      systemd-boot-unsigned \
+    && dnf clean all
+
+# UKI firmata: digest calcolato sul rootfs di "split",
+# lo stesso che diventa la final image.
+FROM buildroot AS sealed-uki
+RUN --mount=type=bind,from=split,target=/target \
+    --mount=type=bind,from=split,source=/kernel,target=/kernel \
+    --mount=type=secret,id=key \
+    --mount=type=secret,id=cert <<'EOF'
+set -euo pipefail
+
+kver=$(ls /kernel)
+test -f "/kernel/${kver}/vmlinuz"
+test -f "/kernel/${kver}/initramfs.img"
+
 mkdir -p /out
-/kernel-src/usr/bin/bootc container ukify \
+bootc container ukify \
   --rootfs /target \
-  --kernel-dir "/kernel-src/usr/lib/modules/${kver}" \
+  --kernel-dir "/kernel/${kver}" \
   -- \
   --output "/out/${kver}.efi" \
   --signtool sbsign \
@@ -68,11 +69,12 @@ mkdir -p /out
   --secureboot-certificate /run/secrets/cert
 EOF
 
-# Immagine finale: rootfs slim + UKI firmata + systemd-boot firmato nei path ESP.
-FROM slim AS final
+# Final image: rootfs già splittato + UKI firmata + systemd-boot firmato.
+FROM split AS final
 COPY --from=sealed-uki /out/*.efi /boot/EFI/Linux/
 
 RUN set -euo pipefail; \
+    rm -rf /kernel; \
     mkdir -p /boot/EFI/BOOT /boot/EFI/systemd; \
     cp /usr/lib/systemd/boot/efi/systemd-bootx64.efi /boot/EFI/BOOT/BOOTX64.EFI; \
     cp /usr/lib/systemd/boot/efi/systemd-bootx64.efi /boot/EFI/systemd/systemd-bootx64.efi; \
