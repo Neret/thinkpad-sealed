@@ -69,6 +69,7 @@ jobs:
           sudo podman build --pull=always \
             --cap-add=all \
             --device /dev/fuse \
+            --security-opt seccomp=unconfined \
             -f seal/Containerfile.seal \
             --build-arg "BASE=ghcr.io/neret/fedora-bootc-sealed-os:latest" \
             --build-arg "PACKAGES=${PACKAGES}" \
