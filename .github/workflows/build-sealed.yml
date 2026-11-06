@@ -39,16 +39,16 @@ jobs:
       - name: Set tag
         run: echo "TAG=sealed-$(date +%Y%m%d%H%M%S)-${GITHUB_SHA::7}" >> "$GITHUB_ENV"
 
-      - name: Extract package list from recipe
+      - name: Generate package list from recipe
         run: |
-          python3 - <<'PY' >> "$GITHUB_ENV"
+          python3 - <<'PY'
           import yaml
-          with open("recipes/packages.yml") as f:
-              doc = yaml.safe_load(f)
-          pkgs = " ".join(doc["install"]["packages"])
-          print(f"PACKAGES={pkgs}")
+          doc = yaml.safe_load(open("recipes/packages.yml"))
+          pkgs = doc["install"]["packages"]
+          with open("seal/packages.txt", "w") as f:
+              f.write("\n".join(pkgs))
+          print(f"{len(pkgs)} pacchetti: {' '.join(pkgs)}")
           PY
-          echo "Pacchetti: ${PACKAGES}"
 
       - name: Registry login
         env:
@@ -69,7 +69,6 @@ jobs:
           sudo podman build --pull=always \
             -f seal/Containerfile.seal \
             --build-arg "BASE=ghcr.io/neret/fedora-bootc-sealed-os:latest" \
-            --build-arg "PACKAGES=${PACKAGES}" \
             --secret "id=key,src=${RUNNER_TEMP}/mok.key" \
             --secret "id=cert,src=${RUNNER_TEMP}/mok.crt" \
             -t "${IMAGE}:${TAG}" \

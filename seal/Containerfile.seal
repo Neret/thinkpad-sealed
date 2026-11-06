@@ -2,15 +2,16 @@
 ARG BASE=ghcr.io/neret/fedora-bootc-sealed-os:latest
 ARG LUKS_UUID=9c879ac9-f3ad-49d9-bd94-1e98e3096f22
 ARG ROOT_UUID=aecc2955-bf15-4741-9b75-ddc0d7184bdb
-# Lista pacchetti generata dalla CI da recipes/packages.yml
-ARG PACKAGES=""
 
 # --- 1. Base: immagine BlueBuild, fonte di repos e chiavi ---
 FROM ${BASE} AS target-base
 
 # --- 2. Rootfs installato con dnf --installroot ---
-# Solo pacchetti: niente dracut/chroot in questa stage.
+# La lista pacchetti arriva da seal/packages.txt, generata dalla CI
+# a partire da recipes/packages.yml (unica fonte di verità).
 FROM target-base AS rootfs-build
+COPY seal/packages.txt /tmp/packages.txt
+
 RUN dnf -y --installroot=/target-rootfs \
       --releasever=45 \
       --setopt=module_platform_id=platform:f45 \
@@ -25,11 +26,10 @@ RUN dnf -y --installroot=/target-rootfs \
       dracut \
       systemd \
       dbus-broker \
-      ${PACKAGES}
+      $(cat /tmp/packages.txt)
 
 # --- 3. Il rootfs diventa il container ---
-# Da qui /proc, /sys e /dev sono montati dal runtime:
-# dracut, assets e systemctl girano nativamente.
+# Da qui /proc, /sys e /dev sono montati dal runtime.
 FROM scratch AS rootfs
 COPY --from=rootfs-build /target-rootfs /
 
@@ -39,7 +39,7 @@ RUN kver=$(ls /usr/lib/modules) && \
       "/usr/lib/modules/${kver}/initramfs.img" "${kver}"
 
 # Pulizia cache e log dnf
-RUN rm -rf /var/cache/dnf /var/log/dnf.*
+RUN rm -rf /var/cache/dnf /var/log/dnf.* /tmp/packages.txt
 
 # Customizzazioni
 COPY files/system/ /
@@ -107,7 +107,6 @@ sbsign --key /run/secrets/key --cert /run/secrets/cert \
 EOF
 
 # --- 5. Final: rootfs intatto + solo /boot aggiunto ---
-# Nessuna modifica al rootfs dopo il calcolo del digest.
 FROM rootfs AS final
 COPY --from=sealer /out/boot/ /boot/
 
