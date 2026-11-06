@@ -28,10 +28,12 @@ ARG LUKS_UUID=9c879ac9-f3ad-49d9-bd94-1e98e3096f22
 ARG ROOT_UUID=aecc2955-bf15-4741-9b75-ddc0d7184bdb
 ARG KARGS_EXTRA=""
 
+# Copia il rootfs in una directory scrivibile: il mount bind da stage è read-only.
+COPY --from=slim / /target
+
 RUN --mount=type=secret,id=key \
     --mount=type=secret,id=cert \
-    --mount=type=bind,from=base,target=/kernel-src \
-    --mount=type=bind,from=slim,target=/target <<'EOF'
+    --mount=type=bind,from=base,target=/kernel-src <<'EOF'
 set -euo pipefail
 
 kver=$(find /kernel-src/usr/lib/modules -mindepth 1 -maxdepth 1 -type d -printf '%f\n' | sort -V | tail -n1)
