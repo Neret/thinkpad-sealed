@@ -1,124 +1,66 @@
 # syntax=docker/dockerfile:1
-ARG BASE=ghcr.io/neret/fedora-bootc-sealed-os:latest
-ARG LUKS_UUID=9c879ac9-f3ad-49d9-bd94-1e98e3096f22
-ARG ROOT_UUID=aecc2955-bf15-4741-9b75-ddc0d7184bdb
+ARG UNSEALED=ghcr.io/neret/fedora-bootc-sealed-os:unsealed-latest
+ARG TOOLS=quay.io/fedora/fedora:45
 
-# --- 1. Base: immagine BlueBuild, fonte di repos e chiavi ---
-FROM ${BASE} AS target-base
+FROM ${UNSEALED} AS base
 
-# --- 2. Rootfs installato con dnf --installroot ---
-# La lista pacchetti arriva da seal/packages.txt, generata dalla CI
-# a partire da recipes/packages.yml (unica fonte di verità).
-FROM target-base AS rootfs-build
-COPY seal/packages.txt /tmp/packages.txt
-
-RUN dnf -y --installroot=/target-rootfs \
-      --releasever=45 \
-      --setopt=module_platform_id=platform:f45 \
-      --use-host-config \
-      --exclude=bootupd \
-      install \
-      fedora-release \
-      bootc \
-      kernel \
-      kernel-modules \
-      kernel-modules-extra \
-      dracut \
-      systemd \
-      dbus-broker \
-      $(cat /tmp/packages.txt)
-
-# --- 3. Il rootfs diventa il container ---
-# Da qui /proc, /sys e /dev sono montati dal runtime.
-FROM scratch AS rootfs
-COPY --from=rootfs-build /target-rootfs /
-
-# bootc/composefs si aspetta /sysroot
-RUN mkdir -p /sysroot
-
-# Initramfs
-RUN kver=$(ls /usr/lib/modules) && \
-    dracut --force --no-hostonly --reproducible \
-      "/usr/lib/modules/${kver}/initramfs.img" "${kver}"
-
-# Pulizia cache e log dnf
-RUN rm -rf /var/cache/dnf /var/log/dnf.* /tmp/packages.txt
-
-# Customizzazioni
-COPY files/system/ /
-COPY files/gschema-overrides/zz0-thinkpad.gschema.override \
-     /usr/share/glib-2.0/schemas/
-COPY files/scripts/assets.sh /tmp/assets.sh
-
+# Rootfs finale senza kernel/initramfs grezzi.
+# IL DIGEST COMPOSEFS DEVE ESSERE CALCOLATO SU QUESTA IMMAGINE.
+FROM base AS slim
 RUN set -euo pipefail; \
-    /tmp/assets.sh; \
-    rm -f /tmp/assets.sh; \
-    glib-compile-schemas /usr/share/glib-2.0/schemas; \
-    systemctl enable \
-      gdm.service \
-      NetworkManager.service \
-      systemd-resolved.service \
-      bluetooth.service \
-      firewalld.service; \
-    systemctl disable irqbalance.service || true; \
-    ln -sf /usr/lib/systemd/system/graphical.target \
-      /etc/systemd/system/default.target
+    kver="$(cd /usr/lib/modules && echo *)"; \
+    test -d "/usr/lib/modules/${kver}"; \
+    rm -f "/usr/lib/modules/${kver}/vmlinuz" "/usr/lib/modules/${kver}/initramfs.img"
 
-# --- 4. UKI firmata + systemd-boot firmato ---
-# Usa il bootc DEL ROOTFS TARGET: generatore e verificatore
-# del digest condividono la stessa versione di bootc/composefs-rs.
-FROM target-base AS sealer
+FROM ${TOOLS} AS buildroot
+RUN dnf install -y systemd-ukify systemd-udev sbsigntools openssl \
+      systemd-boot-unsigned && dnf clean all
+
+FROM buildroot AS kernel
+ARG COMPOSEFS_V1
+ARG COMPOSEFS_V2
 ARG LUKS_UUID=9c879ac9-f3ad-49d9-bd94-1e98e3096f22
 ARG ROOT_UUID=aecc2955-bf15-4741-9b75-ddc0d7184bdb
-RUN dnf install -y systemd-ukify sbsigntools && dnf clean all
-
-RUN --mount=type=bind,from=rootfs,target=/target \
-    --mount=type=secret,id=key \
-    --mount=type=secret,id=cert <<EOF
+ARG KARGS_EXTRA=""
+RUN --mount=type=secret,id=key \
+    --mount=type=secret,id=cert \
+    --mount=type=bind,from=base,target=/kernel-src \
+    --mount=type=bind,from=slim,target=/rootfs <<'EOF'
 set -euo pipefail
+test -n "${COMPOSEFS_V1}" && test -n "${COMPOSEFS_V2}"
 
-kver=$(ls /target/usr/lib/modules)
-test -f "/target/usr/lib/modules/${kver}/vmlinuz"
-test -f "/target/usr/lib/modules/${kver}/initramfs.img"
+kver=$(find /kernel-src/usr/lib/modules -mindepth 1 -maxdepth 1 -type d -printf '%f\n' | sort -V | tail -n1)
+test -n "${kver}"
+test -d "/kernel-src/usr/lib/modules/${kver}"
+test -f "/kernel-src/usr/lib/modules/${kver}/vmlinuz"
+test -f "/kernel-src/usr/lib/modules/${kver}/initramfs.img"
 
-mkdir -p /out/boot/EFI/Linux /out/boot/EFI/BOOT /out/boot/EFI/systemd
+cmdline="composefs.digest=v1-sha512-12:${COMPOSEFS_V1} composefs=${COMPOSEFS_V2} rd.luks.uuid=luks-${LUKS_UUID} rd.luks.options=tpm2-device=auto root=UUID=${ROOT_UUID} vconsole.keymap=it rw rhgb quiet amd_iommu=on iommu=pt mitigations=auto zswap.enabled=0 ${KARGS_EXTRA}"
 
-/target/usr/bin/bootc container ukify \
-  --rootfs /target \
-  --karg "rd.luks.uuid=luks-${LUKS_UUID}" \
-  --karg "rd.luks.options=tpm2-device=auto" \
-  --karg "root=UUID=${ROOT_UUID}" \
-  --karg "vconsole.keymap=it" \
-  --karg "rw" \
-  --karg "rhgb" \
-  --karg "quiet" \
-  --karg "amd_iommu=on" \
-  --karg "iommu=pt" \
-  --karg "mitigations=auto" \
-  --karg "zswap.enabled=0" \
-  -- \
-  --output "/out/boot/EFI/Linux/${kver}.efi" \
+mkdir -p /out
+ukify build \
+  --linux "/kernel-src/usr/lib/modules/${kver}/vmlinuz" \
+  --initrd "/kernel-src/usr/lib/modules/${kver}/initramfs.img" \
+  --uname "${kver}" \
+  --cmdline "${cmdline}" \
+  --os-release "@/rootfs/usr/lib/os-release" \
   --signtool sbsign \
   --secureboot-private-key /run/secrets/key \
-  --secureboot-certificate /run/secrets/cert
-
-sbsign --key /run/secrets/key --cert /run/secrets/cert \
-  --output /out/boot/EFI/BOOT/BOOTX64.EFI \
-  /target/usr/lib/systemd/boot/efi/systemd-bootx64.efi
-
-sbsign --key /run/secrets/key --cert /run/secrets/cert \
-  --output /out/boot/EFI/systemd/systemd-bootx64.efi \
-  /target/usr/lib/systemd/boot/efi/systemd-bootx64.efi
+  --secureboot-certificate /run/secrets/cert \
+  --measure \
+  --output "/out/${kver}.efi"
 EOF
 
-# --- 5. Final: rootfs intatto + solo /boot aggiunto ---
-FROM rootfs AS final
-COPY --from=sealer /out/boot/ /boot/
+# Immagine finale: rootfs slim + UKI firmata.
+# La UKI viene aggiunta DOPO il calcolo del digest.
+FROM slim AS final
+RUN --mount=type=bind,from=kernel,target=/run/kernel <<'EOF'
+set -euo pipefail
+kver="$(cd /usr/lib/modules && echo *)"
+test -n "${kver}"
+mkdir -p /boot/EFI/Linux
+cp "/run/kernel/out/${kver}.efi" "/boot/EFI/Linux/${kver}.efi"
+bootc container lint --fatal-warnings
+EOF
 
-RUN bootc container lint --fatal-warnings
-
-LABEL containers.bootc=1
-LABEL ostree.bootable=1
-LABEL org.opencontainers.image.title="fedora-bootc-sealed-os"
-STOPSIGNAL SIGRTMIN+3
-CMD ["/sbin/init"]
+LABEL containers.bootc=sealed

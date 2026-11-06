@@ -1,0 +1,43 @@
+# syntax=docker/dockerfile:1
+ARG BASE=ghcr.io/neret/fedora-bootc-sealed-os:latest
+
+FROM ${BASE} AS builder
+
+# Rimuove bootupd (non serve con systemd-boot)
+RUN dnf remove -y bootupd || true
+
+# Installa sbsigntools (serve per sbsign)
+RUN dnf install -y sbsigntools && dnf clean all
+
+# Firma systemd-boot con la chiave MOK
+RUN --mount=type=secret,id=key \
+    --mount=type=secret,id=cert <<'EOF'
+set -euo pipefail
+sbsign --key /run/secrets/key --cert /run/secrets/cert \
+  --output /tmp/systemd-bootx64.efi \
+  /usr/lib/systemd/boot/efi/systemd-bootx64.efi
+install -m 0644 /tmp/systemd-bootx64.efi \
+  /usr/lib/systemd/boot/efi/systemd-bootx64.efi
+rm -f /tmp/systemd-bootx64.efi
+EOF
+
+# Pulizia artefatti di build prima del flatten
+RUN rm -rf \
+      /var/cache/dnf \
+      /var/cache/libdnf5 \
+      /var/cache/ldconfig/aux-cache \
+      /var/log/dnf5.log \
+      /var/log/* \
+      /run/dnf \
+      /run/selinux-policy \
+      /var/lib/dnf/repos
+
+# Appiattisce tutto in un solo layer:
+# il digest composefs deve essere calcolato su un filesystem deterministico
+FROM scratch AS unsealed
+COPY --from=builder / /
+LABEL containers.bootc 1
+LABEL ostree.bootable 1
+LABEL org.opencontainers.image.title="fedora-bootc-sealed-os-unsealed"
+STOPSIGNAL SIGRTMIN+3
+CMD ["/sbin/init"]
