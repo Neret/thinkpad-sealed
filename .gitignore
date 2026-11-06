@@ -1,3 +1,21 @@
-secureboot/
+# ISO/disk image build artifacts
+iso/mkosi.output/
+iso/SEALED_IMAGE
+iso/mkosi.cache/
+iso/sealed-installer.raw
+iso/sealed-installer.efi
+iso/sealed-installer.initrd
+iso/sealed-installer.vmlinuz
+iso/initrd
+iso/initrd.cpio.zst
+iso/sealed-installer
+iso/mkosi.skeleton/usr/local/share/mok/MOK.cer
+
+# Secure Boot private keys (mai committare)
+secureboot/MOK.key
+secureboot/MOK-ci.key
+secureboot/cosign.key
+
+# Backup
+*.bak
 *.key
-*.pem

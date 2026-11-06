@@ -23,6 +23,15 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y mkosi
 
+      - name: Copy MOK into ISO skeleton
+        run: |
+          mkdir -p iso/mkosi.skeleton/usr/local/share/mok
+          cp secureboot/MOK.cer iso/mkosi.skeleton/usr/local/share/mok/MOK.cer
+
+      - name: Make installer script executable
+        run: |
+          chmod +x iso/mkosi.skeleton/usr/local/sbin/install-sealed-os
+
       - name: Build installer ISO
         env:
           SEALED_IMAGE: ${{ inputs.image_ref }}
