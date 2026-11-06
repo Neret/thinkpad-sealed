@@ -65,11 +65,13 @@ RUN set -euo pipefail; \
 # Usa il bootc DEL ROOTFS TARGET: generatore e verificatore
 # del digest condividono la stessa versione di bootc/composefs-rs.
 FROM target-base AS sealer
+ARG LUKS_UUID=9c879ac9-f3ad-49d9-bd94-1e98e3096f22
+ARG ROOT_UUID=aecc2955-bf15-4741-9b75-ddc0d7184bdb
 RUN dnf install -y systemd-ukify sbsigntools && dnf clean all
 
 RUN --mount=type=bind,from=rootfs,target=/target \
     --mount=type=secret,id=key \
-    --mount=type=secret,id=cert <<'EOF'
+    --mount=type=secret,id=cert <<EOF
 set -euo pipefail
 
 kver=$(ls /target/usr/lib/modules)

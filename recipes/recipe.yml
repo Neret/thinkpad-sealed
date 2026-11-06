@@ -32,7 +32,6 @@ modules:
         - bluetooth.service
         - firewalld.service
       disabled:
-        - irqbalance.service
         - sshd.service
 
   - from-file: flatpaks.yml
