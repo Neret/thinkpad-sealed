@@ -17,7 +17,8 @@ RUN dnf install -y systemd-ukify systemd-udev sbsigntools openssl \
       systemd-boot-unsigned && dnf clean all
 
 FROM buildroot AS kernel
-ARG COMPOSEFS_DIGEST
+ARG COMPOSEFS_V1
+ARG COMPOSEFS_V2
 ARG LUKS_UUID=9c879ac9-f3ad-49d9-bd94-1e98e3096f22
 ARG ROOT_UUID=aecc2955-bf15-4741-9b75-ddc0d7184bdb
 ARG KARGS_EXTRA=""
@@ -26,7 +27,7 @@ RUN --mount=type=secret,id=key \
     --mount=type=bind,from=base,target=/kernel-src \
     --mount=type=bind,from=slim,target=/rootfs <<'EOF'
 set -euo pipefail
-test -n "${COMPOSEFS_DIGEST}"
+test -n "${COMPOSEFS_V1}" && test -n "${COMPOSEFS_V2}"
 
 kver=$(find /kernel-src/usr/lib/modules -mindepth 1 -maxdepth 1 -type d -printf '%f\n' | sort -V | tail -n1)
 test -n "${kver}"
@@ -34,7 +35,7 @@ test -d "/kernel-src/usr/lib/modules/${kver}"
 test -f "/kernel-src/usr/lib/modules/${kver}/vmlinuz"
 test -f "/kernel-src/usr/lib/modules/${kver}/initramfs.img"
 
-cmdline="composefs=${COMPOSEFS_DIGEST} rd.luks.uuid=luks-${LUKS_UUID} rd.luks.options=tpm2-device=auto root=UUID=${ROOT_UUID} vconsole.keymap=it rw rhgb quiet amd_iommu=on iommu=pt mitigations=auto zswap.enabled=0 ${KARGS_EXTRA}"
+cmdline="composefs.digest=v1-sha512-12:${COMPOSEFS_V1} composefs=${COMPOSEFS_V2} rd.luks.uuid=luks-${LUKS_UUID} rd.luks.options=tpm2-device=auto root=UUID=${ROOT_UUID} vconsole.keymap=it rw rhgb quiet amd_iommu=on iommu=pt mitigations=auto zswap.enabled=0 ${KARGS_EXTRA}"
 
 mkdir -p /out
 ukify build \

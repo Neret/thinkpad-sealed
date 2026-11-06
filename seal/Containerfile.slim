@@ -1,7 +1,0 @@
-ARG BASE
-
-FROM ${BASE} AS slim
-RUN set -euo pipefail; \
-    kver="$(cd /usr/lib/modules && echo *)"; \
-    test -d "/usr/lib/modules/${kver}"; \
-    rm -f "/usr/lib/modules/${kver}/vmlinuz" "/usr/lib/modules/${kver}/initramfs.img"
