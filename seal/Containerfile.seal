@@ -2,15 +2,33 @@
 ARG BASE=ghcr.io/neret/fedora-bootc-sealed-os:latest
 ARG LUKS_UUID=9c879ac9-f3ad-49d9-bd94-1e98e3096f22
 ARG ROOT_UUID=aecc2955-bf15-4741-9b75-ddc0d7184bdb
+# Lista pacchetti generata dalla CI da recipes/packages.yml
+ARG PACKAGES=""
 
-# --- 1. Base: immagine BlueBuild, fonte del package set ---
+# --- 1. Base: immagine BlueBuild, fonte di repos e package set ---
 FROM ${BASE} AS target-base
 
 # --- 2. Rootfs composefs-native, ricostruito from scratch ---
-# Stesso package set dell'immagine BlueBuild, ma albero pulito:
-# niente /sysroot/ostree, niente metadati ostree.
+# Usa i repo della base come sorgente; il manifest di default
+# produce un rootfs fedora-bootc pulito, senza /sysroot/ostree.
 FROM target-base AS build-rootfs
-RUN bootc-base-imagectl build-rootfs --target-arch=x86_64 /target-rootfs
+RUN /usr/libexec/bootc-base-imagectl build-rootfs / /target-rootfs
+
+# Installa i pacchetti della recipe nel rootfs ricostruito,
+# usando dnf della base e i suoi repo.
+RUN --mount=type=bind,from=target-base,target=/run/base \
+    /run/base/usr/bin/dnf -y \
+      --installroot=/target-rootfs \
+      --releasever=45 \
+      --setopt=reposdir=/run/base/etc/yum.repos.d \
+      --setopt=module_platform_id=platform:f45 \
+      install \
+      ${PACKAGES}
+
+# Pulizia cache e metadati dnf nel rootfs
+RUN rm -rf /target-rootfs/var/cache/dnf \
+           /target-rootfs/var/log/dnf.* \
+           /target-rootfs/var/lib/dnf
 
 # Ri-applica le customizzazioni sul rootfs ricostruito
 COPY files/system/ /target-rootfs/
@@ -21,7 +39,7 @@ COPY files/scripts/assets.sh /target-rootfs/tmp/assets.sh
 RUN set -euo pipefail; \
     chroot /target-rootfs /tmp/assets.sh; \
     rm -f /target-rootfs/tmp/assets.sh; \
-    glib-compile-schemas /target-rootfs/usr/share/glib-2.0/schemas; \
+    chroot /target-rootfs glib-compile-schemas /usr/share/glib-2.0/schemas; \
     systemctl --root=/target-rootfs enable \
       gdm.service \
       NetworkManager.service \
@@ -82,6 +100,7 @@ sbsign --key /run/secrets/key --cert /run/secrets/cert \
 EOF
 
 # --- 5. Final: rootfs intatto + solo /boot aggiunto ---
+# Nessuna modifica al rootfs dopo il calcolo del digest.
 FROM rootfs AS final
 COPY --from=sealer /out/boot/ /boot/
 
