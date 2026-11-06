@@ -10,6 +10,7 @@ on:
     branches: [main]
     paths:
       - "seal/**"
+      - "files/**"
       - ".github/workflows/build-sealed.yml"
 
 permissions:
@@ -51,20 +52,11 @@ jobs:
           printf '%s\n' "$SB_KEY" > "$RUNNER_TEMP/mok.key"
           printf '%s\n' "$SB_CERT" > "$RUNNER_TEMP/mok.crt"
 
-      - name: Build unsealed image (systemd-boot firmato, senza bootupd)
+      - name: Build sealed image (rootfs from scratch + UKI firmata)
         run: |
           sudo podman build --pull=always \
-            -f seal/Containerfile.unsealed \
-            -t "localhost/unsealed:${TAG}" \
-            --secret "id=key,src=${RUNNER_TEMP}/mok.key" \
-            --secret "id=cert,src=${RUNNER_TEMP}/mok.crt" \
-            .
-
-      - name: Build sealed image (digest composefs + UKI via bootc container ukify)
-        run: |
-          sudo podman build --pull=never \
-            -f seal/Containerfile.seal --target final \
-            --build-arg "UNSEALED=localhost/unsealed:${TAG}" \
+            -f seal/Containerfile.seal \
+            --build-arg "BASE=ghcr.io/neret/fedora-bootc-sealed-os:latest" \
             --secret "id=key,src=${RUNNER_TEMP}/mok.key" \
             --secret "id=cert,src=${RUNNER_TEMP}/mok.crt" \
             -t "${IMAGE}:${TAG}" \
@@ -75,12 +67,10 @@ jobs:
           sudo apt-get update -qq
           sudo apt-get install -y -qq sbsigntool
           sudo podman run --rm "${IMAGE}:${TAG}" sh -c 'cat /boot/EFI/Linux/*.efi' > "$RUNNER_TEMP/uki.efi"
-          sudo podman run --rm "${IMAGE}:${TAG}" cat /usr/lib/systemd/boot/efi/systemd-bootx64.efi > "$RUNNER_TEMP/sdboot.efi"
           sudo podman run --rm "${IMAGE}:${TAG}" cat /boot/EFI/BOOT/BOOTX64.EFI > "$RUNNER_TEMP/bootx64.efi"
           sudo podman run --rm "${IMAGE}:${TAG}" cat /boot/EFI/systemd/systemd-bootx64.efi > "$RUNNER_TEMP/systemd-bootx64.efi"
 
           sbverify --cert "$RUNNER_TEMP/mok.crt" "$RUNNER_TEMP/uki.efi"
-          sbverify --cert "$RUNNER_TEMP/mok.crt" "$RUNNER_TEMP/sdboot.efi"
           sbverify --cert "$RUNNER_TEMP/mok.crt" "$RUNNER_TEMP/bootx64.efi"
           sbverify --cert "$RUNNER_TEMP/mok.crt" "$RUNNER_TEMP/systemd-bootx64.efi"
 

@@ -1,79 +1,90 @@
 # syntax=docker/dockerfile:1
-ARG UNSEALED=ghcr.io/neret/fedora-bootc-sealed-os:unsealed-latest
-
-FROM ${UNSEALED} AS base
-
-# Stage rootfs: pulizia ostree + kargs + split kernel/initramfs.
-# Il digest composefs sarà calcolato su QUESTO albero,
-# che è anche la base della final image: le viste coincidono.
-FROM base AS split
+ARG BASE=ghcr.io/neret/fedora-bootc-sealed-os:latest
 ARG LUKS_UUID=9c879ac9-f3ad-49d9-bd94-1e98e3096f22
 ARG ROOT_UUID=aecc2955-bf15-4741-9b75-ddc0d7184bdb
-ARG KARGS_EXTRA=""
 
-# Il repository ostree non serve al backend composefs e il suo
-# contenuto/metadati può falsare il digest calcolato sulla directory.
-RUN rm -rf /sysroot/ostree
+# --- 1. Base: immagine BlueBuild, fonte del package set ---
+FROM ${BASE} AS target-base
+
+# --- 2. Rootfs composefs-native, ricostruito from scratch ---
+# Stesso package set dell'immagine BlueBuild, ma albero pulito:
+# niente /sysroot/ostree, niente metadati ostree.
+FROM target-base AS build-rootfs
+RUN bootc-base-imagectl build-rootfs --target-arch=x86_64 /target-rootfs
+
+# Ri-applica le customizzazioni sul rootfs ricostruito
+COPY files/system/ /target-rootfs/
+COPY files/gschema-overrides/zz0-thinkpad.gschema.override \
+     /target-rootfs/usr/share/glib-2.0/schemas/
+COPY files/scripts/assets.sh /target-rootfs/tmp/assets.sh
 
 RUN set -euo pipefail; \
-    mkdir -p /usr/lib/bootc/kargs.d; \
-    cat > /usr/lib/bootc/kargs.d/10-sealed.conf <<KARGS
-rd.luks.uuid=luks-${LUKS_UUID}
-rd.luks.options=tpm2-device=auto
-root=UUID=${ROOT_UUID}
-vconsole.keymap=it
-rw
-rhgb
-quiet
-amd_iommu=on
-iommu=pt
-mitigations=auto
-zswap.enabled=0
-${KARGS_EXTRA}
-KARGS
+    chroot /target-rootfs /tmp/assets.sh; \
+    rm -f /target-rootfs/tmp/assets.sh; \
+    glib-compile-schemas /target-rootfs/usr/share/glib-2.0/schemas; \
+    systemctl --root=/target-rootfs enable \
+      gdm.service \
+      NetworkManager.service \
+      systemd-resolved.service \
+      bluetooth.service \
+      firewalld.service; \
+    systemctl --root=/target-rootfs disable irqbalance.service || true; \
+    ln -sf /usr/lib/systemd/system/graphical.target \
+      /target-rootfs/etc/systemd/system/default.target
 
-# Sposta vmlinuz/initramfs in /kernel/<kver>/ e li rimuove dal rootfs:
-# finiranno embedded nella UKI.
-RUN mkdir /kernel && \
-    bootc container split-kernel-and-rootfs --rootfs / --output /kernel
+# --- 3. Rootfs finale: albero pulito, base del digest ---
+FROM scratch AS rootfs
+COPY --from=build-rootfs /target-rootfs /
 
-# UKI firmata usando il bootc della BASE image:
-# generatore e verificatore del digest usano la stessa versione
-# di bootc/composefs-rs.
-FROM base AS sealed-uki
+# --- 4. UKI firmata + systemd-boot firmato ---
+# Usa il bootc DEL ROOTFS TARGET: generatore e verificatore
+# del digest condividono la stessa versione di bootc/composefs-rs.
+FROM target-base AS sealer
 RUN dnf install -y systemd-ukify sbsigntools && dnf clean all
 
-RUN --mount=type=bind,from=split,target=/target \
-    --mount=type=bind,from=split,source=/kernel,target=/kernel \
+RUN --mount=type=bind,from=rootfs,target=/target \
     --mount=type=secret,id=key \
     --mount=type=secret,id=cert <<'EOF'
 set -euo pipefail
 
-kver=$(ls /kernel)
-test -f "/kernel/${kver}/vmlinuz"
-test -f "/kernel/${kver}/initramfs.img"
+kver=$(ls /target/usr/lib/modules)
+test -f "/target/usr/lib/modules/${kver}/vmlinuz"
+test -f "/target/usr/lib/modules/${kver}/initramfs.img"
 
-mkdir -p /out
-bootc container ukify \
+mkdir -p /out/boot/EFI/Linux /out/boot/EFI/BOOT /out/boot/EFI/systemd
+
+/target/usr/bin/bootc container ukify \
   --rootfs /target \
-  --kernel-dir "/kernel/${kver}" \
+  --karg "rd.luks.uuid=luks-${LUKS_UUID}" \
+  --karg "rd.luks.options=tpm2-device=auto" \
+  --karg "root=UUID=${ROOT_UUID}" \
+  --karg "vconsole.keymap=it" \
+  --karg "rw" \
+  --karg "rhgb" \
+  --karg "quiet" \
+  --karg "amd_iommu=on" \
+  --karg "iommu=pt" \
+  --karg "mitigations=auto" \
+  --karg "zswap.enabled=0" \
   -- \
-  --output "/out/${kver}.efi" \
+  --output "/out/boot/EFI/Linux/${kver}.efi" \
   --signtool sbsign \
   --secureboot-private-key /run/secrets/key \
   --secureboot-certificate /run/secrets/cert
+
+sbsign --key /run/secrets/key --cert /run/secrets/cert \
+  --output /out/boot/EFI/BOOT/BOOTX64.EFI \
+  /target/usr/lib/systemd/boot/efi/systemd-bootx64.efi
+
+sbsign --key /run/secrets/key --cert /run/secrets/cert \
+  --output /out/boot/EFI/systemd/systemd-bootx64.efi \
+  /target/usr/lib/systemd/boot/efi/systemd-bootx64.efi
 EOF
 
-# Final image: stesso albero su cui è stato calcolato il digest,
-# più la UKI in /boot (che bootc esclude dal composefs).
-# NON rimuovere /kernel: farebbe cambiare l'albero rispetto al digest.
-FROM split AS final
-COPY --from=sealed-uki /out/*.efi /boot/EFI/Linux/
+# --- 5. Final: rootfs intatto + solo /boot aggiunto ---
+FROM rootfs AS final
+COPY --from=sealer /out/boot/ /boot/
 
-RUN set -euo pipefail; \
-    mkdir -p /boot/EFI/BOOT /boot/EFI/systemd; \
-    cp /usr/lib/systemd/boot/efi/systemd-bootx64.efi /boot/EFI/BOOT/BOOTX64.EFI; \
-    cp /usr/lib/systemd/boot/efi/systemd-bootx64.efi /boot/EFI/systemd/systemd-bootx64.efi; \
-    bootc container lint --fatal-warnings
+RUN bootc container lint --fatal-warnings
 
 LABEL containers.bootc=sealed
