@@ -15,6 +15,7 @@ FROM target-base AS rootfs-build
 RUN dnf -y --installroot=/target-rootfs \
       --releasever=45 \
       --setopt=module_platform_id=platform:f45 \
+      --use-host-config \
       install \
       fedora-release \
       bootc \
