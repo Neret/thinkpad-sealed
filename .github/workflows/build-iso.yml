@@ -43,5 +43,5 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: fedora-bootc-sealed-os-installer
-          path: iso/mkosi.output/*
+          path: iso/sealed-installer.raw
           retention-days: 7
