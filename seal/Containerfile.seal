@@ -16,6 +16,7 @@ RUN dnf -y --installroot=/target-rootfs \
       --releasever=45 \
       --setopt=module_platform_id=platform:f45 \
       --use-host-config \
+      --exclude=bootupd \
       install \
       fedora-release \
       bootc \
@@ -27,11 +28,8 @@ RUN dnf -y --installroot=/target-rootfs \
       ${PACKAGES}
 
 # Device minimi per far funzionare dracut in chroot
-RUN mkdir -p /target-rootfs/dev /target-rootfs/proc /target-rootfs/sys /target-rootfs/run && \
-    mknod -m 666 /target-rootfs/dev/null c 1 3 && \
-    mknod -m 666 /target-rootfs/dev/zero c 1 5 && \
-    mknod -m 666 /target-rootfs/dev/random c 1 8 && \
-    mknod -m 666 /target-rootfs/dev/urandom c 1 9
+# /dev è già popolato dai pacchetti di base: nessun mknod necessario.
+RUN mkdir -p /target-rootfs/proc /target-rootfs/sys /target-rootfs/run
 
 # Genera l'initramfs dentro il rootfs
 RUN kver=$(ls /target-rootfs/usr/lib/modules) && \
