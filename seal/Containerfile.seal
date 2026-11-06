@@ -19,8 +19,6 @@ RUN dnf install -y systemd-ukify systemd-udev sbsigntools openssl \
 FROM buildroot AS kernel
 ARG COMPOSEFS_V1
 ARG COMPOSEFS_V2
-ARG LUKS_UUID=9c879ac9-f3ad-49d9-bd94-1e98e3096f22
-ARG ROOT_UUID=aecc2955-bf15-4741-9b75-ddc0d7184bdb
 ARG KARGS_EXTRA=""
 RUN --mount=type=secret,id=key \
     --mount=type=secret,id=cert \
@@ -35,7 +33,7 @@ test -d "/kernel-src/usr/lib/modules/${kver}"
 test -f "/kernel-src/usr/lib/modules/${kver}/vmlinuz"
 test -f "/kernel-src/usr/lib/modules/${kver}/initramfs.img"
 
-cmdline="composefs.digest=v1-sha512-12:${COMPOSEFS_V1} composefs=${COMPOSEFS_V2} rd.luks.uuid=luks-${LUKS_UUID} rd.luks.options=tpm2-device=auto root=UUID=${ROOT_UUID} vconsole.keymap=it rw rhgb quiet amd_iommu=on iommu=pt mitigations=auto zswap.enabled=0 ${KARGS_EXTRA}"
+cmdline="composefs.digest=v1-sha512-12:${COMPOSEFS_V1} composefs=${COMPOSEFS_V2} rd.luks.options=tpm2-device=auto vconsole.keymap=it rw rhgb quiet amd_iommu=on iommu=pt mitigations=auto zswap.enabled=0 ${KARGS_EXTRA}"
 
 mkdir -p /out
 ukify build \

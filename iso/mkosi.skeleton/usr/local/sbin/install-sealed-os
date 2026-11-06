@@ -1,43 +1,34 @@
 #!/bin/bash
 set -euo pipefail
-
 DISK="${1:-}"
-[ -n "$DISK" ] || { echo "uso: install-sealed-os /dev/sdX"; exit 1; }
+[ -b "$DISK" ] || { echo "uso: install-sealed-os /dev/nvme0n1"; exit 1; }
+IMAGE="$(cat /SEALED_IMAGE)"
 
-IMAGE_FILE="/SEALED_IMAGE"
-[ -f "$IMAGE_FILE" ] || { echo "manca $IMAGE_FILE"; exit 1; }
-IMAGE="$(cat "$IMAGE_FILE")"
+lsblk "$DISK"
+read -rp "CANCELLA TUTTO su $DISK. Scrivi YES: " ans
+[ "$ans" = YES ] || exit 1
 
-echo ">> Installazione di ${IMAGE} su ${DISK}"
+podman pull "$IMAGE"
+podman run --rm --privileged --pid=host --security-opt label=type:unconfined_t \
+  -v /dev:/dev -v /var/lib/containers:/var/lib/containers "$IMAGE" \
+  bootc install to-disk --composefs-backend --bootloader systemd \
+  --filesystem btrfs --wipe "$DISK"
 
-# 1. Installazione della rootfs sealed
-bootc install to-disk \
-  --via-loopback \
-  --composefs-backend \
-  --bootloader systemd \
-  --filesystem btrfs \
-  "$DISK"
-
-# 2. Individua l'ESP (FAT32) e copia shim + MokManager + MOK
-ESP="$(lsblk -no PATH,FSTYPE "$DISK" | awk '$2=="vfat"{print $1; exit}')"
+partprobe "$DISK"; sleep 2
+ESP="$(lsblk -rno PATH,FSTYPE "$DISK" | awk '$2=="vfat"{print $1; exit}')"
 [ -n "$ESP" ] || { echo "ESP non trovata"; exit 1; }
+mkdir -p /mnt/esp && mount "$ESP" /mnt/esp
 
-mkdir -p /mnt/esp
-mount "$ESP" /mnt/esp
+SHIM="$(find /boot /usr/share/efi /usr/lib -name shimx64.efi 2>/dev/null | head -n1)"
+MM="$(find /boot /usr/share/efi /usr/lib -name mmx64.efi 2>/dev/null | head -n1)"
+SDB=/mnt/esp/EFI/systemd/systemd-bootx64.efi
+[ -n "$SHIM" ] && [ -n "$MM" ] && [ -f "$SDB" ] || { echo "shim, mmx64 o systemd-boot mancanti"; umount /mnt/esp; exit 1; }
 
-mkdir -p /mnt/esp/EFI/BOOT /mnt/esp/EFI/systemd
-
-# shim (Microsoft-signed) e MokManager
-SHIM="$(find /usr/share/efi /boot/efi -name 'shimx64.efi' 2>/dev/null | head -n1)"
-MM="$(find /usr/share/efi /boot/efi -name 'mmx64.efi' 2>/dev/null | head -n1)"
-[ -n "$SHIM" ] && [ -n "$MM" ] || { echo "shim/mmx64 non trovati"; umount /mnt/esp; exit 1; }
-
+cp "$SDB"  /mnt/esp/EFI/BOOT/grubx64.efi   # systemd-boot firmato MOK, caricato da shim
 cp "$SHIM" /mnt/esp/EFI/BOOT/BOOTX64.EFI
 cp "$MM"   /mnt/esp/EFI/BOOT/mmx64.efi
+cp /usr/local/share/mok/MOK.cer /mnt/esp/EFI/BOOT/MOK.cer
+sync; umount /mnt/esp
 
-# MOK (DER) per l'enrollment al primo boot
-cp /usr/local/share/mok/MOK.cer /mnt/esp/EFI/BOOT/MOK.der
-
-umount /mnt/esp
-
-echo ">> Installazione completata. Al primo boot, MokManager chiederà di enrollare il MOK."
+echo "Primo boot: shim non riconosce systemd-boot e apre MokManager."
+echo "Scegli 'Enroll key from disk' -> EFI/BOOT/MOK.cer -> Continue -> Yes."
