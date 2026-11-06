@@ -13,7 +13,6 @@ RUN set -euo pipefail; \
 
 FROM ${TOOLS} AS buildroot
 RUN dnf install -y \
-      bootc \
       systemd-ukify \
       systemd-udev \
       sbsigntools \
@@ -58,7 +57,7 @@ ${KARGS_EXTRA}
 KARGS
 
 mkdir -p /out
-bootc container ukify \
+/kernel-src/usr/bin/bootc container ukify \
   --rootfs /target \
   --kernel-dir "/kernel-src/usr/lib/modules/${kver}" \
   -- \
