@@ -1,0 +1,39 @@
+name: Build Sealed Installer ISO
+
+on:
+  workflow_dispatch:
+    inputs:
+      image_ref:
+        description: "Immagine sealed da includere nell'ISO"
+        required: true
+        default: "ghcr.io/neret/fedora-bootc-sealed-os:sealed"
+
+permissions:
+  contents: read
+
+jobs:
+  build-iso:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install mkosi
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y mkosi
+
+      - name: Build installer ISO
+        env:
+          SEALED_IMAGE: ${{ inputs.image_ref }}
+        run: |
+          cd iso
+          echo "${SEALED_IMAGE}" > SEALED_IMAGE
+          mkosi build
+
+      - name: Upload ISO
+        uses: actions/upload-artifact@v4
+        with:
+          name: fedora-bootc-sealed-os-installer
+          path: iso/mkosi.output/*
+          retention-days: 7

@@ -2,12 +2,10 @@ name: Build Sealed Image
 
 on:
   workflow_dispatch:
-  # dopo ogni build di BlueBuild (settimanale o per modifiche a recipes/files)
   workflow_run:
     workflows: ["Build Custom OS"]
     types: [completed]
     branches: [main]
-  # modifiche ai Containerfile di sigillatura
   push:
     branches: [main]
     paths:
@@ -53,7 +51,6 @@ jobs:
           printf '%s\n' "$SB_KEY" > "$RUNNER_TEMP/mok.key"
           printf '%s\n' "$SB_CERT" > "$RUNNER_TEMP/mok.crt"
 
-      # Tutto resta nello stesso storage: niente immagine "unsealed" nel registry.
       - name: Build unsealed image (systemd-boot firmato, senza bootupd)
         run: |
           sudo podman build --pull=always \
@@ -63,35 +60,11 @@ jobs:
             --secret "id=cert,src=${RUNNER_TEMP}/mok.crt" \
             .
 
-      - name: Build slim image (su questa si calcola il digest)
+      - name: Build sealed image (digest composefs + UKI via bootc container ukify)
         run: |
           sudo podman build --pull=never \
-            -f seal/Containerfile.seal --target slim \
-            --build-arg "UNSEALED=localhost/unsealed:${TAG}" \
-            -t "localhost/slim:${TAG}" \
-            .
-
-      # Stessa vista di "bootc install": digest dallo storage, con il bootc dell'immagine.
-      - name: Compute composefs digests from storage
-        run: |
-          for v in v1 v2; do
-            d="$(sudo podman run --rm --privileged --pid=host --security-opt label=disable \
-              -v /var/lib/containers:/var/lib/containers \
-              "localhost/slim:${TAG}" \
-              bootc container compute-composefs-digest-from-storage \
-              --erofs-version "$v" "localhost/slim:${TAG}" | tail -n1)"
-            [[ "$d" =~ ^[0-9a-f]{128}$ ]] || { echo "digest ${v} non valido: ${d}"; exit 1; }
-            echo "COMPOSEFS_${v^^}=${d}" >> "$GITHUB_ENV"
-            echo "composefs ${v}: ${d}"
-          done
-
-      - name: Build sealed image (UKI firmata con la chiave MOK)
-        run: |
-          sudo podman build --pull=missing \
             -f seal/Containerfile.seal --target final \
             --build-arg "UNSEALED=localhost/unsealed:${TAG}" \
-            --build-arg "COMPOSEFS_V1=${COMPOSEFS_V1}" \
-            --build-arg "COMPOSEFS_V2=${COMPOSEFS_V2}" \
             --secret "id=key,src=${RUNNER_TEMP}/mok.key" \
             --secret "id=cert,src=${RUNNER_TEMP}/mok.crt" \
             -t "${IMAGE}:${TAG}" \
@@ -103,16 +76,20 @@ jobs:
           sudo apt-get install -y -qq sbsigntool
           sudo podman run --rm "${IMAGE}:${TAG}" sh -c 'cat /boot/EFI/Linux/*.efi' > "$RUNNER_TEMP/uki.efi"
           sudo podman run --rm "${IMAGE}:${TAG}" cat /usr/lib/systemd/boot/efi/systemd-bootx64.efi > "$RUNNER_TEMP/sdboot.efi"
+          sudo podman run --rm "${IMAGE}:${TAG}" cat /boot/EFI/BOOT/BOOTX64.EFI > "$RUNNER_TEMP/bootx64.efi"
+          sudo podman run --rm "${IMAGE}:${TAG}" cat /boot/EFI/systemd/systemd-bootx64.efi > "$RUNNER_TEMP/systemd-bootx64.efi"
+
           sbverify --cert "$RUNNER_TEMP/mok.crt" "$RUNNER_TEMP/uki.efi"
           sbverify --cert "$RUNNER_TEMP/mok.crt" "$RUNNER_TEMP/sdboot.efi"
+          sbverify --cert "$RUNNER_TEMP/mok.crt" "$RUNNER_TEMP/bootx64.efi"
+          sbverify --cert "$RUNNER_TEMP/mok.crt" "$RUNNER_TEMP/systemd-bootx64.efi"
+
           {
             echo "### ${IMAGE}:${TAG}"
             echo "- certificato: $(openssl x509 -in "$RUNNER_TEMP/mok.crt" -noout -fingerprint -sha256)"
             echo "- UKI: $(ls -lh "$RUNNER_TEMP/uki.efi" | awk '{print $5}')"
           } >> "$GITHUB_STEP_SUMMARY"
 
-      # Se il digest nella UKI non coincide con l'immagine, bootc install fallisce qui
-      # e l'immagine non viene pubblicata.
       - name: Rehearsal - bootc install su disco loopback
         run: |
           sudo mkdir -p /mnt/rehearsal
