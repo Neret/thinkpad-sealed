@@ -8,9 +8,8 @@ ARG PACKAGES=""
 # --- 1. Base: immagine BlueBuild, fonte di repos e chiavi ---
 FROM ${BASE} AS target-base
 
-# --- 2. Rootfs da zero con dnf --installroot ---
-# Eseguito DALLA BASE (che ha shell e dnf), scrivendo in /target-rootfs.
-# Nessun rpm-ostree, nessun privilegio speciale.
+# --- 2. Rootfs installato con dnf --installroot ---
+# Solo pacchetti: niente dracut/chroot in questa stage.
 FROM target-base AS rootfs-build
 RUN dnf -y --installroot=/target-rootfs \
       --releasever=45 \
@@ -25,48 +24,44 @@ RUN dnf -y --installroot=/target-rootfs \
       kernel-modules-extra \
       dracut \
       systemd \
+      dbus-broker \
       ${PACKAGES}
 
-# Device minimi per far funzionare dracut in chroot
-# /dev è già popolato dai pacchetti di base: nessun mknod necessario.
-RUN mkdir -p /target-rootfs/proc /target-rootfs/sys /target-rootfs/run
+# --- 3. Il rootfs diventa il container ---
+# Da qui /proc, /sys e /dev sono montati dal runtime:
+# dracut, assets e systemctl girano nativamente.
+FROM scratch AS rootfs
+COPY --from=rootfs-build /target-rootfs /
 
-# Genera l'initramfs dentro il rootfs
-RUN kver=$(ls /target-rootfs/usr/lib/modules) && \
-    chroot /target-rootfs dracut \
-      --force --no-hostonly --reproducible \
+# Initramfs
+RUN kver=$(ls /usr/lib/modules) && \
+    dracut --force --no-hostonly --reproducible \
       "/usr/lib/modules/${kver}/initramfs.img" "${kver}"
 
 # Pulizia cache e log dnf
-RUN rm -rf /target-rootfs/var/cache/dnf \
-           /target-rootfs/var/log/dnf.* \
-           /target-rootfs/var/lib/dnf
+RUN rm -rf /var/cache/dnf /var/log/dnf.*
 
-# --- 3. Customizzazioni sul rootfs ---
-COPY files/system/ /target-rootfs/
+# Customizzazioni
+COPY files/system/ /
 COPY files/gschema-overrides/zz0-thinkpad.gschema.override \
-     /target-rootfs/usr/share/glib-2.0/schemas/
-COPY files/scripts/assets.sh /target-rootfs/tmp/assets.sh
+     /usr/share/glib-2.0/schemas/
+COPY files/scripts/assets.sh /tmp/assets.sh
 
 RUN set -euo pipefail; \
-    chroot /target-rootfs /tmp/assets.sh; \
-    rm -f /target-rootfs/tmp/assets.sh; \
-    chroot /target-rootfs glib-compile-schemas /usr/share/glib-2.0/schemas; \
-    systemctl --root=/target-rootfs enable \
+    /tmp/assets.sh; \
+    rm -f /tmp/assets.sh; \
+    glib-compile-schemas /usr/share/glib-2.0/schemas; \
+    systemctl enable \
       gdm.service \
       NetworkManager.service \
       systemd-resolved.service \
       bluetooth.service \
       firewalld.service; \
-    systemctl --root=/target-rootfs disable irqbalance.service || true; \
+    systemctl disable irqbalance.service || true; \
     ln -sf /usr/lib/systemd/system/graphical.target \
-      /target-rootfs/etc/systemd/system/default.target
+      /etc/systemd/system/default.target
 
-# --- 4. Rootfs finale: albero pulito, base del digest ---
-FROM scratch AS rootfs
-COPY --from=rootfs-build /target-rootfs /
-
-# --- 5. UKI firmata + systemd-boot firmato ---
+# --- 4. UKI firmata + systemd-boot firmato ---
 # Usa il bootc DEL ROOTFS TARGET: generatore e verificatore
 # del digest condividono la stessa versione di bootc/composefs-rs.
 FROM target-base AS sealer
@@ -111,7 +106,7 @@ sbsign --key /run/secrets/key --cert /run/secrets/cert \
   /target/usr/lib/systemd/boot/efi/systemd-bootx64.efi
 EOF
 
-# --- 6. Final: rootfs intatto + solo /boot aggiunto ---
+# --- 5. Final: rootfs intatto + solo /boot aggiunto ---
 # Nessuna modifica al rootfs dopo il calcolo del digest.
 FROM rootfs AS final
 COPY --from=sealer /out/boot/ /boot/
