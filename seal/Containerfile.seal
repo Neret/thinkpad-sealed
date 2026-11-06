@@ -14,45 +14,34 @@ FROM ${BASE} AS target-base
 FROM target-base AS build-rootfs
 RUN /usr/libexec/bootc-base-imagectl build-rootfs / /target-rootfs
 
-# Installa i pacchetti della recipe nel rootfs ricostruito,
-# usando dnf della base e i suoi repo.
-RUN --mount=type=bind,from=target-base,target=/run/base \
-    /run/base/usr/bin/dnf -y \
-      --installroot=/target-rootfs \
-      --releasever=45 \
-      --setopt=reposdir=/run/base/etc/yum.repos.d \
-      --setopt=module_platform_id=platform:f45 \
-      install \
-      ${PACKAGES}
+# --- 3. Rootfs pulito: da qui il dnf è quello del rootfs stesso ---
+FROM scratch AS rootfs
+COPY --from=build-rootfs /target-rootfs /
 
-# Pulizia cache e metadati dnf nel rootfs
-RUN rm -rf /target-rootfs/var/cache/dnf \
-           /target-rootfs/var/log/dnf.* \
-           /target-rootfs/var/lib/dnf
+# Installa i pacchetti della recipe direttamente nel rootfs
+RUN dnf -y install ${PACKAGES} && \
+    dnf clean all && \
+    rm -rf /var/cache/dnf /var/log/dnf.*
 
-# Ri-applica le customizzazioni sul rootfs ricostruito
-COPY files/system/ /target-rootfs/
+# Ri-applica le customizzazioni
+COPY files/system/ /
 COPY files/gschema-overrides/zz0-thinkpad.gschema.override \
-     /target-rootfs/usr/share/glib-2.0/schemas/
-COPY files/scripts/assets.sh /target-rootfs/tmp/assets.sh
+     /usr/share/glib-2.0/schemas/
+COPY files/scripts/assets.sh /tmp/assets.sh
 
 RUN set -euo pipefail; \
-    chroot /target-rootfs /tmp/assets.sh; \
-    rm -f /target-rootfs/tmp/assets.sh; \
-    chroot /target-rootfs glib-compile-schemas /usr/share/glib-2.0/schemas; \
-    systemctl --root=/target-rootfs enable \
+    /tmp/assets.sh; \
+    rm -f /tmp/assets.sh; \
+    glib-compile-schemas /usr/share/glib-2.0/schemas; \
+    systemctl enable \
       gdm.service \
       NetworkManager.service \
       systemd-resolved.service \
       bluetooth.service \
       firewalld.service; \
-    systemctl --root=/target-rootfs disable irqbalance.service || true; \
+    systemctl disable irqbalance.service || true; \
     ln -sf /usr/lib/systemd/system/graphical.target \
-      /target-rootfs/etc/systemd/system/default.target
-
-# --- 3. Rootfs finale: albero pulito, base del digest ---
-FROM scratch AS rootfs
-COPY --from=build-rootfs /target-rootfs /
+      /etc/systemd/system/default.target
 
 # --- 4. UKI firmata + systemd-boot firmato ---
 # Usa il bootc DEL ROOTFS TARGET: generatore e verificatore
@@ -106,4 +95,8 @@ COPY --from=sealer /out/boot/ /boot/
 
 RUN bootc container lint --fatal-warnings
 
-LABEL containers.bootc=sealed
+LABEL containers.bootc=1
+LABEL ostree.bootable=1
+LABEL org.opencontainers.image.title="fedora-bootc-sealed-os"
+STOPSIGNAL SIGRTMIN+3
+CMD ["/sbin/init"]
