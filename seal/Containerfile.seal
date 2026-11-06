@@ -33,6 +33,9 @@ RUN dnf -y --installroot=/target-rootfs \
 FROM scratch AS rootfs
 COPY --from=rootfs-build /target-rootfs /
 
+# bootc/composefs si aspetta /sysroot
+RUN mkdir -p /sysroot
+
 # Initramfs
 RUN kver=$(ls /usr/lib/modules) && \
     dracut --force --no-hostonly --reproducible \
