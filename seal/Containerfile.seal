@@ -34,20 +34,12 @@ KARGS
 RUN mkdir /kernel && \
     bootc container split-kernel-and-rootfs --rootfs / --output /kernel
 
-FROM ${TOOLS} AS buildroot
-RUN dnf install -y \
-      bootc \
-      ostree-libs \
-      systemd-ukify \
-      systemd-udev \
-      sbsigntools \
-      openssl \
-      systemd-boot-unsigned \
-    && dnf clean all
+# UKI firmata usando il bootc della BASE image:
+# generatore e verificatore del digest usano la stessa versione
+# di bootc/composefs-rs, eliminando il mismatch di formato.
+FROM base AS sealed-uki
+RUN dnf install -y systemd-ukify sbsigntools && dnf clean all
 
-# UKI firmata: digest calcolato sul rootfs di "split",
-# lo stesso che diventa la final image.
-FROM buildroot AS sealed-uki
 RUN --mount=type=bind,from=split,target=/target \
     --mount=type=bind,from=split,source=/kernel,target=/kernel \
     --mount=type=secret,id=key \
