@@ -6,14 +6,6 @@ on:
     workflows: ["Build Custom OS"]
     types: [completed]
     branches: [main]
-  push:
-    branches: [main]
-    paths:
-      - "seal/**"
-      - "files/**"
-      - "recipes/**"
-      - ".github/workflows/build-sealed.yml"
-
 permissions:
   contents: read
   packages: write
