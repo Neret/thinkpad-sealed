@@ -17,16 +17,41 @@ ask() {
   printf '%s' "${value:-$default}"
 }
 
+DISK=""
+IMAGE=""
+MOK_CERT=""
 SCR=/run/sealed-scratch
 KEY=/run/sealed-luks.key
+TOOLS=sealed-tools
+TOOLS_BASE=quay.io/fedora/fedora:45
+SCRATCH_G=20
+FINISH="${FINISH:-0}"
+TOOLS_BUILT=0
+EFI_SRC=""
 
-unbind_tmp() {
-  while findmnt -n -o SOURCE --target /var/tmp 2>/dev/null | grep -q "${DISK}p3"; do
-    umount /var/tmp 2>/dev/null || break
-  done
+cleanup() {
+  if [[ -n "${EFI_SRC:-}" && -d "$EFI_SRC" ]]; then
+    rm -rf "$EFI_SRC"
+  fi
+
+  if [[ -n "${DISK:-}" ]]; then
+    while findmnt -n -o SOURCE --target /var/tmp 2>/dev/null | grep -q "${DISK}p3"; do
+      umount /var/tmp 2>/dev/null || break
+    done
+  fi
+
+  umount "$SCR" 2>/dev/null || true
+  umount /mnt/boot 2>/dev/null || true
+  umount /mnt 2>/dev/null || true
+  cryptsetup close cryptroot 2>/dev/null || true
+  rm -f "$KEY"
+
+  if [[ "$TOOLS_BUILT" == 1 ]]; then
+    "$RUNTIME" rmi -f "$TOOLS" >/dev/null 2>&1 || true
+  fi
 }
 
-trap 'rm -f "$KEY"; unbind_tmp' EXIT
+trap cleanup EXIT INT TERM
 
 [[ $EUID -eq 0 ]] || die "Esegui lo script come root (sudo)."
 [[ "$(uname -m)" == "x86_64" ]] || die "Supportato solo UEFI x86_64."
@@ -41,14 +66,10 @@ fi
 
 DISK="$(ask 'Disco target (verra cancellato)' '/dev/nvme0n1')"
 IMAGE="$(ask 'Immagine bootc' 'ghcr.io/neret/fedora-bootc-sealed-os:sealed')"
-TOOLS_BASE="$(ask 'Immagine base strumenti' 'quay.io/fedora/fedora:45')"
 MOK_CERT="$(ask 'Certificato MOK DER' './MOK.cer')"
-SCRATCH_G="$(ask 'Dimensione scratch in GiB' '20')"
-TOOLS="$(ask 'Nome container strumenti' 'sealed-tools')"
 
 [[ -b "$DISK" ]] || die "Disco non trovato: $DISK"
 [[ -f "$MOK_CERT" ]] || die "Certificato MOK non trovato: $MOK_CERT"
-[[ "$SCRATCH_G" =~ ^[0-9]+$ ]] || die "Dimensione scratch non valida: $SCRATCH_G"
 
 for cmd in sfdisk wipefs blkid lsblk mount findmnt cryptsetup file udevadm blockdev; do
   command -v "$cmd" >/dev/null 2>&1 || die "Comando mancante: $cmd"
@@ -73,6 +94,7 @@ RUN dnf install -y dosfstools btrfs-progs sbsigntools openssl shim-x64 \
 EOF
 "$RUNTIME" build -q -t "$TOOLS" "$BUILD_DIR" >/dev/null
 rm -rf "$BUILD_DIR"
+TOOLS_BUILT=1
 ok "container strumenti pronto"
 
 tool() {
@@ -94,8 +116,6 @@ ok "shim e MokManager estratti"
 log "Disco target"
 lsblk -o NAME,SIZE,TYPE,FSTYPE,MOUNTPOINTS,MODEL "$DISK"
 
-FINISH="${FINISH:-0}"
-
 if [[ "$FINISH" == 1 ]]; then
   read -rsp "Passphrase LUKS gia' impostata: " P1; echo
 else
@@ -106,6 +126,7 @@ else
   read -rsp "Ripeti la passphrase LUKS: " P2; echo
   [[ -n "$P1" && "$P1" == "$P2" ]] || die "Le passphrase non coincidono (o sono vuote)."
 fi
+
 ( umask 077; printf '%s' "$P1" > "$KEY" )
 unset P1 P2
 
@@ -113,7 +134,11 @@ if [[ "$FINISH" != 1 ]]; then
 
 log "Pulizia di mount, LUKS e firme residue"
 umount -R /mnt 2>/dev/null || true
-unbind_tmp
+
+while findmnt -n -o SOURCE --target /var/tmp 2>/dev/null | grep -q "${DISK}p3"; do
+  umount /var/tmp 2>/dev/null || break
+done
+
 umount "$SCR" 2>/dev/null || true
 cryptsetup close cryptroot 2>/dev/null || true
 wipefs -af "${DISK}"p* 2>/dev/null || true
@@ -137,6 +162,7 @@ SCRATCH="${DISK}p3"
 log "Formatto ESP e scratch"
 tool mkfs.vfat -F32 "$ESP"
 tool mkfs.btrfs -f -L scratch "$SCRATCH"
+
 mkdir -p "$SCR"
 mount "$SCRATCH" "$SCR"
 chmod 1777 "$SCR"
@@ -170,12 +196,15 @@ echo "ESP UUID:   $ESP_UUID"
 
 log "Installo immagine sealed: $IMAGE"
 
+BOOTC_MOUNTS=(-v /dev:/dev -v "$SCR":/var/tmp -v /mnt:/target)
+
+if [[ -d /var/lib/containers ]]; then
+  BOOTC_MOUNTS+=(-v /var/lib/containers:/var/lib/containers)
+fi
+
 "$RUNTIME" run --rm --privileged --pid=host --ipc=host \
-  --security-opt label=type:unconfined_t \
-  -v /dev:/dev \
-  -v /var/lib/containers:/var/lib/containers \
-  -v "$SCR":/var/tmp \
-  -v /mnt:/target \
+  --security-opt label=disable \
+  "${BOOTC_MOUNTS[@]}" \
   "$IMAGE" \
   bootc install to-filesystem \
   --composefs-backend \
@@ -186,10 +215,15 @@ log "Installo immagine sealed: $IMAGE"
 sync
 
 else
-  ESP="${DISK}p1"; ROOT="${DISK}p2"; SCRATCH="${DISK}p3"
+  ESP="${DISK}p1"
+  ROOT="${DISK}p2"
+  SCRATCH="${DISK}p3"
+
   [[ -b /dev/mapper/cryptroot ]] && mountpoint -q /mnt \
     || die "FINISH=1: LUKS aperto o /mnt non montato. Rilancia senza FINISH."
+
   mountpoint -q /mnt/boot || mount "$ESP" /mnt/boot
+
   LUKS_UUID="$(cryptsetup luksUUID "$ROOT")"
   ROOT_UUID="$(blkid -s UUID -o value /dev/mapper/cryptroot)"
   ESP_UUID="$(blkid -s UUID -o value "$ESP")"
@@ -198,6 +232,7 @@ fi
 log "Rimonto la ESP in scrittura"
 mount -o remount,rw /mnt/boot 2>/dev/null \
   || { umount /mnt/boot && mount "$ESP" /mnt/boot; }
+
 touch /mnt/boot/.rwtest 2>/dev/null && rm -f /mnt/boot/.rwtest \
   || { dmesg | tail -n 15; die "ESP ancora in sola lettura (vedi dmesg sopra)"; }
 ok "ESP scrivibile"
@@ -280,9 +315,6 @@ log "Smonto e chiudo LUKS"
 umount /mnt/boot
 umount /mnt
 cryptsetup close cryptroot
-unbind_tmp
-umount "$SCR" 2>/dev/null || true
-rm -rf "$EFI_SRC"
 
 log "Restituisco lo spazio di scratch alla root"
 if sfdisk --delete "$DISK" 3 \
@@ -297,8 +329,6 @@ if sfdisk --delete "$DISK" 3 \
 else
   warn "ridimensionamento non riuscito: il sistema funziona comunque, la root resta di ${ROOT_G} GiB"
 fi
-umount /mnt 2>/dev/null || true
-cryptsetup close cryptroot 2>/dev/null || true
 
 log "Installazione completata"
 echo "Al primo boot:"

@@ -76,6 +76,7 @@ install:
     - rsms-inter-fonts
     - fontconfig
     - zoxide
+    - which
     - zsh
     - zsh-autosuggestions
     - zsh-syntax-highlighting

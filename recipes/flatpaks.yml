@@ -11,7 +11,6 @@ configurations:
       - com.github.tchx84.Flatseal
       - de.haeckerfelix.Fragments
       - io.github.flattool.Warehouse
-      - io.github.kolunmi.Bazaar
       - io.missioncenter.MissionCenter
       - org.gnome.baobab
       - org.gnome.Calculator
