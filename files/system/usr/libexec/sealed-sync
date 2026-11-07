@@ -15,7 +15,20 @@ for a in "$@"; do
             DRY_RUN=1
             ;;
         -h|--help)
-            sed -n '5,20p' "$0"
+            printf '%s\n' \
+                'Usage: sealed-sync [--dry-run] [component ...]' \
+                '' \
+                'Options:' \
+                '  --dry-run       Mount the ESP read-only and report changes without writing.' \
+                '  -h, --help      Show this help.' \
+                '' \
+                'Components:' \
+                '  bootloader      Sync systemd-boot binaries.' \
+                '  shim            Sync the Microsoft-signed shim binary.' \
+                '  mokmanager      Sync the MokManager binary.' \
+                '  mokcert         Sync the MOK certificate on the ESP.' \
+                '' \
+                'If no component is specified, all components are processed.'
             exit 0
             ;;
         -*)
