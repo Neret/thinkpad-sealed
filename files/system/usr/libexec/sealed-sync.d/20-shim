@@ -1,0 +1,42 @@
+#!/usr/bin/bash
+set -euo pipefail
+
+source "${SEALED_LIBEXEC:-/usr/libexec}/sealed-sync-lib"
+
+component=shim
+
+[[ -n "$MNT" ]] || die "do not run directly: use 'sudo /usr/libexec/sealed-sync shim'"
+
+shim_dir
+
+SRC="$SHIM_DIR/shimx64.efi"
+DST="$MNT/EFI/BOOT/BOOTX64.EFI"
+MARK="$MNT/EFI/BOOT/shim-version.txt"
+
+[[ -s "$SRC" ]] || die "missing source file: $SRC"
+
+need_sbverify
+
+sbverify --list "$SRC" 2>&1 | grep -qi 'Microsoft' \
+    || die "image shim does not have a Microsoft signature: refusing to modify the ESP"
+
+log_info "$component" "Microsoft signature present: shim $SHIM_VER"
+
+OLD_VER="$(cat "$MARK" 2>/dev/null || true)"
+
+if [[ -n "$OLD_VER" ]]; then
+    newest="$(printf '%s\n%s\n' "$OLD_VER" "$SHIM_VER" | sort -V | tail -n1)"
+
+    if [[ "$newest" != "$SHIM_VER" ]]; then
+        log_warning "$component" "image shim ($SHIM_VER) is older than the ESP version ($OLD_VER): refusing to downgrade"
+        exit 0
+    fi
+else
+    log_notice "$component" "unknown shim version on the ESP (first run): proceeding with $SHIM_VER"
+fi
+
+sync_file "$SRC" "$DST"
+
+if [[ "$OLD_VER" != "$SHIM_VER" ]]; then
+    put_text "$MARK" "$SHIM_VER"
+fi

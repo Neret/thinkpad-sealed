@@ -1,0 +1,43 @@
+#!/usr/bin/bash
+set -euo pipefail
+
+source "${SEALED_LIBEXEC:-/usr/libexec}/sealed-sync-lib"
+
+component=mokcert
+
+[[ -n "$MNT" ]] || die "do not run directly: use 'sudo /usr/libexec/sealed-sync mokcert'"
+
+[[ -s "$CERT" ]] || die "missing MOK certificate: $CERT"
+
+if ! command -v openssl >/dev/null 2>&1; then
+    log_warning "$component" "openssl not found: skipping MOK.cer synchronization"
+    exit 0
+fi
+
+DST="$MNT/EFI/BOOT/MOK.cer"
+
+fp_new="$(openssl x509 -in "$CERT" -noout -fingerprint -sha256 2>/dev/null)" \
+    || die "$CERT is not a valid PEM certificate"
+
+fp_old=""
+if [[ -f "$DST" ]]; then
+    fp_old="$(openssl x509 -inform DER -in "$DST" -noout -fingerprint -sha256 2>/dev/null || true)"
+fi
+
+if [[ "$fp_new" == "$fp_old" ]]; then
+    log_info "$component" "already aligned: EFI/BOOT/MOK.cer"
+    exit 0
+fi
+
+if [[ "$DRY_RUN" == 1 ]]; then
+    log_info "$component" "would update: EFI/BOOT/MOK.cer"
+    exit 0
+fi
+
+tmp="$DST.new"
+
+openssl x509 -in "$CERT" -outform DER -out "$tmp"
+sync -f "$tmp"
+mv -f -- "$tmp" "$DST"
+
+log_info "$component" "updated: EFI/BOOT/MOK.cer ($fp_new)"

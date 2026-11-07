@@ -1,0 +1,44 @@
+#!/usr/bin/bash
+set -euo pipefail
+
+source "${SEALED_LIBEXEC:-/usr/libexec}/sealed-sync-lib"
+
+component=bootloader
+
+[[ -n "$MNT" ]] || die "do not run directly: use 'sudo /usr/libexec/sealed-sync bootloader'"
+
+SRC="$ROOT/usr/lib/systemd/boot/efi/systemd-bootx64.efi"
+DST1="$MNT/EFI/systemd/systemd-bootx64.efi"
+DST2="$MNT/EFI/BOOT/grubx64.efi"
+
+[[ -s "$SRC" ]] || die "missing source file: $SRC"
+[[ -s "$CERT" ]] || die "missing MOK certificate: $CERT; refusing to modify the ESP"
+
+need_sbverify
+
+sbverify --cert "$CERT" "$SRC" >/dev/null 2>&1 \
+    || die "signature of $SRC is not valid for certificate $CERT: refusing to modify the ESP"
+
+log_info "$component" "signature valid: image systemd-boot"
+
+sdb_version() {
+    grep -aoE 'LoaderInfo: systemd-boot [^ ]+' "$1" 2>/dev/null \
+        | head -n1 \
+        | awk '{print $3}' \
+        || true
+}
+
+V_NEW="$(sdb_version "$SRC")"
+V_OLD="$(sdb_version "$DST1")"
+
+if [[ -n "$V_NEW" && -n "$V_OLD" && "$V_NEW" != "$V_OLD" ]]; then
+    newest="$(printf '%s\n%s\n' "$V_OLD" "$V_NEW" | sort -V | tail -n1)"
+
+    if [[ "$newest" != "$V_NEW" ]]; then
+        log_warning "$component" "image systemd-boot ($V_NEW) is older than the ESP version ($V_OLD): refusing to downgrade"
+        exit 0
+    fi
+fi
+
+sync_file "$SRC" "$DST1"
+sync_file "$SRC" "$DST2"

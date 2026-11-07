@@ -31,9 +31,8 @@ modules:
         - systemd-resolved.service
         - bluetooth.service
         - firewalld.service
-        - sealed-sync@bootloader.service
-        - sealed-sync@shim.service
-        - sealed-sync@mokmanager.service
+        - sealed-sync.service
+        - sealed-upgrade.timer
       disabled:
         - sshd.service
 

@@ -1,0 +1,23 @@
+#!/usr/bin/bash
+set -euo pipefail
+
+source "${SEALED_LIBEXEC:-/usr/libexec}/sealed-sync-lib"
+
+component=mokmanager
+
+[[ -n "$MNT" ]] || die "do not run directly: use 'sudo /usr/libexec/sealed-sync mokmanager'"
+
+shim_dir
+
+SRC="$SHIM_DIR/mmx64.efi"
+
+[[ -s "$SRC" ]] || die "missing source file: $SRC"
+
+need_sbverify
+
+sbverify --list "$SRC" 2>&1 | grep -q 'image signature' \
+    || die "image MokManager is not signed: refusing to modify the ESP"
+
+log_info "$component" "MokManager is signed: $SHIM_VER"
+
+sync_file "$SRC" "$MNT/EFI/BOOT/mmx64.efi"

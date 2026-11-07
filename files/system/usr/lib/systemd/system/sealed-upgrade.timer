@@ -1,0 +1,11 @@
+[Unit]
+Description=Daily check for OS image updates
+
+[Timer]
+OnBootSec=20min
+OnCalendar=daily
+Persistent=true
+RandomizedDelaySec=30min
+
+[Install]
+WantedBy=timers.target

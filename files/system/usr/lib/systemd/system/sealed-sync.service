@@ -1,0 +1,17 @@
+[Unit]
+Description=Align sealed boot components with the active OS image
+ConditionPathExists=/sys/firmware/efi
+After=local-fs.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/libexec/sealed-sync
+TimeoutStartSec=180
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=sealed-sync
+NoNewPrivileges=yes
+PrivateNetwork=yes
+
+[Install]
+WantedBy=multi-user.target

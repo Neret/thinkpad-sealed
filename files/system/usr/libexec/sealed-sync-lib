@@ -1,59 +1,178 @@
 #!/usr/bin/bash
-# Funzioni comuni degli script sealed-sync-* (si usa con "source", non va eseguito).
-# Va in: files/system/usr/libexec/sealed-sync-lib
-#
-# - esp_open: prende un lock (gli script non scrivono mai in parallelo), monta la ESP in rw
-#   su una cartella temporanea e pulisce i *.new rimasti da copie interrotte.
-# - sync_file: se il file sulla ESP e' identico alla sorgente non fa niente; altrimenti salva
-#   il vecchio come <file>.prev, copia su <file>.new, controlla con cmp e sostituisce con mv.
+set -euo pipefail
 
-ESP_DEV="${ESP_DEV:-/dev/disk/by-partlabel/ESP}"
-CERT="${CERT:-/usr/share/sealed/MOK.crt}"
-MNT=""
+ROOT="${SEALED_ROOT:-}"
+CERT="${CERT:-$ROOT/usr/share/sealed/MOK.crt}"
+DRY_RUN="${DRY_RUN:-0}"
+MNT="${ESP_MNT:-}"
+MNT_CREATED=0
+ESP_MOUNTED=0
+LOADER_UUID_VAR=/sys/firmware/efi/efivars/LoaderDevicePartUUID-4a67b082-0a4c-41cf-b6c7-440b29bb8c4f
 
-die() { echo "${0##*/}: $*" >&2; exit 1; }
+die() {
+    echo "${0##*/}: $*" >&2
+    exit 1
+}
+
+log() {
+    local level="$1"
+    local component="$2"
+    shift 2
+
+    case "$level" in
+        emerg|alert|crit|err|warning|notice|info|debug) ;;
+        *) return 2 ;;
+    esac
+
+    if [[ "$level" == "debug" && "${SEALED_SYNC_DEBUG:-0}" != 1 ]]; then
+        return 0
+    fi
+
+    printf '%s: %s: %s\n' "$level" "$component" "$*" >&2
+}
+
+log_debug()   { log debug   "$@"; }
+log_info()    { log info    "$@"; }
+log_notice()  { log notice  "$@"; }
+log_warning() { log warning "$@"; }
+log_err()     { log err     "$@"; }
+log_crit()    { log crit    "$@"; }
 
 need_sbverify() {
-  command -v sbverify >/dev/null 2>&1 \
-    || die "sbverify non trovato (aggiungi sbsigntools a packages.yml): non tocco la ESP"
+    command -v sbverify >/dev/null 2>&1 || die "sbverify not found (install the sbsigntools package)"
+}
+
+find_esp() {
+    local u dev
+
+    if [[ -r "$LOADER_UUID_VAR" ]]; then
+        u="$(tail -c +5 "$LOADER_UUID_VAR" | tr -d '\0\n' | tr 'A-F' 'a-f')"
+        dev="/dev/disk/by-partuuid/$u"
+
+        if [[ -n "$u" && -b "$dev" ]]; then
+            log_info orchestrator "ESP found via LoaderDevicePartUUID"
+            echo "$dev"
+            return 0
+        fi
+    fi
+
+    if [[ -b /dev/disk/by-partlabel/ESP ]]; then
+        log_warning orchestrator "LoaderDevicePartUUID unavailable; falling back to GPT label ESP"
+        echo /dev/disk/by-partlabel/ESP
+        return 0
+    fi
+
+    return 1
 }
 
 esp_close() {
-  [[ -n "$MNT" ]] || return 0
-  mountpoint -q "$MNT" && umount "$MNT" || true
-  rmdir "$MNT" 2>/dev/null || true
+    if (( ESP_MOUNTED )); then
+        umount "$MNT" 2>/dev/null || umount -l "$MNT" 2>/dev/null || true
+    fi
+
+    if (( MNT_CREATED )); then
+        rmdir "$MNT" 2>/dev/null || true
+    fi
 }
 
 esp_open() {
-  [[ -b "$ESP_DEV" ]] || die "ESP non trovata: $ESP_DEV"
-  exec 9>/run/sealed-esp.lock
-  flock 9
-  MNT="$(mktemp -d /run/sealed-esp.XXXXXX)"
-  trap esp_close EXIT
-  mount -o rw,nosuid,nodev,noexec "$ESP_DEV" "$MNT"
-  mkdir -p "$MNT/EFI/systemd" "$MNT/EFI/BOOT"
-  rm -f -- "$MNT"/EFI/systemd/*.new "$MNT"/EFI/BOOT/*.new
+    local mode="$1"
+    local dev
+
+    if [[ -n "${SEALED_ESP_DIR:-}" ]]; then
+        MNT="$SEALED_ESP_DIR"
+
+        if [[ "$mode" == "rw" ]]; then
+            mkdir -p "$MNT/EFI/systemd" "$MNT/EFI/BOOT"
+            rm -f -- "$MNT"/EFI/systemd/*.new "$MNT"/EFI/BOOT/*.new
+        fi
+
+        return 0
+    fi
+
+    dev="$(find_esp)" || die "ESP not found (neither LoaderDevicePartUUID nor GPT label ESP)"
+
+    log_info orchestrator "using ESP device: $dev"
+
+    exec 9>/run/sealed-sync.lock
+    flock -w 60 9 || die "another synchronization is already running (lock timeout)"
+
+    MNT="$(mktemp -d /run/sealed-esp.XXXXXX)" || die "failed to create a temporary mount point"
+    MNT_CREATED=1
+    trap esp_close EXIT
+
+    mount -o "$mode,nosuid,nodev,noexec" "$dev" "$MNT" || die "failed to mount the ESP"
+    ESP_MOUNTED=1
+
+    [[ -d "$MNT/EFI/Linux" ]] \
+        || die "$dev does not look like this system's ESP (missing EFI/Linux): refusing to write"
+
+    if [[ "$mode" == "rw" ]]; then
+        mkdir -p "$MNT/EFI/systemd" "$MNT/EFI/BOOT"
+        rm -f -- "$MNT"/EFI/systemd/*.new "$MNT"/EFI/BOOT/*.new
+    fi
 }
 
 sync_file() {
-  local src="$1" dst="$2" tmp="$2.new"
-  if [[ -f "$dst" ]] && cmp -s "$src" "$dst"; then
-    echo "gia' allineato: ${dst#$MNT/}"
-    return 0
-  fi
-  [[ -f "$dst" ]] && cp -pf -- "$dst" "$dst.prev"
-  cp -- "$src" "$tmp"
-  sync -f "$tmp"
-  cmp -s "$src" "$tmp" || { rm -f "$tmp"; die "copia corrotta: $dst"; }
-  mv -f -- "$tmp" "$dst"
-  echo "aggiornato: ${dst#$MNT/}"
+    local src="$1"
+    local dst="$2"
+    local tmp="$2.new"
+    local need
+    local avail
+
+    if [[ -f "$dst" ]] && cmp -s "$src" "$dst"; then
+        log_info sync "already aligned: ${dst#$MNT/}"
+        return 0
+    fi
+
+    if [[ "$DRY_RUN" == 1 ]]; then
+        log_info sync "would update: ${dst#$MNT/}"
+        return 0
+    fi
+
+    need=$(( $(stat -c %s "$src") * 2 + 1048576 ))
+    avail="$(df --output=avail -B1 "$MNT" 2>/dev/null | tail -n1 | tr -d ' ')"
+
+    if ! [[ "$avail" =~ ^[0-9]+$ ]] || (( avail < need )); then
+        die "insufficient free space on the ESP to update $dst (need $need bytes)"
+    fi
+
+    if [[ -f "$dst" ]]; then
+        cp -pf -- "$dst" "$dst.prev"
+    fi
+
+    cp -- "$src" "$tmp"
+    sync -f "$tmp"
+
+    if ! cmp -s "$src" "$tmp"; then
+        rm -f -- "$tmp"
+        die "corrupted copy detected for $dst"
+    fi
+
+    mv -f -- "$tmp" "$dst"
+    log_info sync "updated: ${dst#$MNT/}"
 }
 
-# shim e MokManager: cartella piu' recente del pacchetto shim-x64 nell'immagine
+put_text() {
+    local dst="$1"
+    local tmp="$1.new"
+
+    if [[ "$DRY_RUN" == 1 ]]; then
+        log_info sync "would write: ${dst#$MNT/}"
+        return 0
+    fi
+
+    printf '%s\n' "$2" > "$tmp"
+    sync -f "$tmp"
+    mv -f -- "$tmp" "$dst"
+}
+
 shim_dir() {
-  local v
-  v="$(ls -1 /usr/lib/efi/shim 2>/dev/null | sort -V | tail -n1 || true)"
-  [[ -n "$v" ]] || die "nessuna versione in /usr/lib/efi/shim (shim-x64 non nell'immagine?)"
-  SHIM_VER="$v"
-  SHIM_DIR="/usr/lib/efi/shim/$v/EFI/fedora"
+    local v
+
+    v="$(ls -1 "$ROOT/usr/lib/efi/shim" 2>/dev/null | sort -V | tail -n1 || true)"
+    [[ -n "$v" ]] || die "no shim version found in /usr/lib/efi/shim (is shim-x64 installed in the image?)"
+
+    SHIM_VER="$v"
+    SHIM_DIR="$ROOT/usr/lib/efi/shim/$v/EFI/fedora"
 }
