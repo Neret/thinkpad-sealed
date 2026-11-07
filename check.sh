@@ -250,6 +250,20 @@ else
   warn "confronto bootloader ESP/immagine saltato (non avviato dall'immagine composefs)"
 fi
 
+# shim e MokManager sulla ESP vs quelli dell'immagine in uso (aggiornamento: sealed-shim-sync --apply)
+SHIM_DIR="$(ls -d /usr/lib/efi/shim/*/EFI/fedora 2>/dev/null | sort -V | tail -n1 || true)"
+if [[ -n "$SHIM_DIR" ]] && grep -q 'composefs' /proc/cmdline; then
+  SHIM_VER="${SHIM_DIR#/usr/lib/efi/shim/}"; SHIM_VER="${SHIM_VER%%/*}"
+  cmp -s "$SHIM_DIR/shimx64.efi" "$ESP_MNT/EFI/BOOT/BOOTX64.EFI" \
+    && ok "shim sulla ESP == quello dell'immagine ($SHIM_VER)" \
+    || warn "shim sulla ESP diverso da quello dell'immagine ($SHIM_VER): sudo /usr/libexec/sealed-shim-sync --apply"
+  cmp -s "$SHIM_DIR/mmx64.efi" "$ESP_MNT/EFI/BOOT/mmx64.efi" \
+    && ok "MokManager sulla ESP == quello dell'immagine ($SHIM_VER)" \
+    || warn "MokManager sulla ESP diverso da quello dell'immagine ($SHIM_VER): sudo /usr/libexec/sealed-shim-sync --apply"
+else
+  warn "confronto shim ESP/immagine saltato (shim non trovato in /usr/lib/efi/shim o avvio non composefs)"
+fi
+
 if file -b "$MOK_CERT" | grep -qi PEM; then
   err "il MOK.cer fornito e' PEM (serve DER)"
 else

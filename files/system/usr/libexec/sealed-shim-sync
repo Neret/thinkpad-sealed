@@ -1,0 +1,129 @@
+#!/usr/bin/bash
+# Confronta shim e MokManager sulla ESP con quelli dell'immagine e, su richiesta, li aggiorna.
+# Va in: files/system/usr/libexec/sealed-shim-sync (eseguibile)
+#
+# Uso:
+#   sealed-shim-sync                 solo controllo: avvisa se diversi, non scrive nulla (exit 0)
+#   sealed-shim-sync --apply         aggiorna shim e MokManager con le protezioni sotto
+#   sealed-shim-sync --apply --force salta il rifiuto di scendere di versione / la conferma
+#
+# Protezioni di --apply:
+#   - shim deve avere firma Microsoft e MokManager una firma 'image signature' (sbverify --list)
+#   - rifiuta di scendere a una versione piu' vecchia di quella registrata sulla ESP
+#   - se la versione sulla ESP e' sconosciuta chiede conferma (serve un terminale)
+#   - backup .prev di ogni file sostituito, copia su .new + cmp + mv
+# La versione registrata sta in EFI/BOOT/shim-version.txt (nome della cartella in /usr/lib/efi/shim).
+set -euo pipefail
+
+SRC_ROOT=/usr/lib/efi/shim
+ESP_DEV="${ESP_DEV:-/dev/disk/by-partlabel/ESP}"
+
+MODE=check
+FORCE=0
+for a in "$@"; do
+  case "$a" in
+    --apply) MODE=apply ;;
+    --force) FORCE=1 ;;
+    *) echo "uso: ${0##*/} [--apply [--force]]" >&2; exit 2 ;;
+  esac
+done
+
+die() { echo "sealed-shim-sync: $*" >&2; exit 1; }
+
+[[ -d "$SRC_ROOT" ]] || die "manca $SRC_ROOT (pacchetto shim-x64 non nell'immagine?)"
+NEW_VER="$(ls -1 "$SRC_ROOT" | sort -V | tail -n1)"
+[[ -n "$NEW_VER" ]] || die "nessuna versione in $SRC_ROOT"
+SHIM_SRC="$SRC_ROOT/$NEW_VER/EFI/fedora/shimx64.efi"
+MM_SRC="$SRC_ROOT/$NEW_VER/EFI/fedora/mmx64.efi"
+[[ -s "$SHIM_SRC" ]] || die "manca $SHIM_SRC"
+[[ -s "$MM_SRC" ]]   || die "manca $MM_SRC"
+[[ -b "$ESP_DEV" ]]  || die "ESP non trovata: $ESP_DEV"
+
+MNT="$(mktemp -d /run/sealed-esp-shim.XXXXXX)"
+cleanup() {
+  mountpoint -q "$MNT" && umount "$MNT" || true
+  rmdir "$MNT" 2>/dev/null || true
+}
+trap cleanup EXIT
+
+if [[ "$MODE" == apply ]]; then
+  mount -o rw,nosuid,nodev,noexec "$ESP_DEV" "$MNT"
+else
+  mount -o ro,nosuid,nodev,noexec "$ESP_DEV" "$MNT"
+fi
+
+SHIM_DST="$MNT/EFI/BOOT/BOOTX64.EFI"
+MM_DST="$MNT/EFI/BOOT/mmx64.efi"
+MARK="$MNT/EFI/BOOT/shim-version.txt"
+OLD_VER="$(cat "$MARK" 2>/dev/null || true)"
+
+DIFF=0
+if cmp -s "$SHIM_SRC" "$SHIM_DST"; then
+  echo "shim allineato (immagine $NEW_VER): EFI/BOOT/BOOTX64.EFI"
+else
+  echo "shim DIVERSO dall'immagine ($NEW_VER): EFI/BOOT/BOOTX64.EFI"; DIFF=1
+fi
+if cmp -s "$MM_SRC" "$MM_DST"; then
+  echo "MokManager allineato (immagine $NEW_VER): EFI/BOOT/mmx64.efi"
+else
+  echo "MokManager DIVERSO dall'immagine ($NEW_VER): EFI/BOOT/mmx64.efi"; DIFF=1
+fi
+
+if [[ "$MODE" == check ]]; then
+  if (( DIFF )); then
+    echo "ATTENZIONE: shim/MokManager sulla ESP non coincidono con l'immagine."
+    echo "Per aggiornarli: sudo /usr/libexec/sealed-shim-sync --apply"
+  fi
+  exit 0
+fi
+
+# ----------------------------- --apply -----------------------------
+rm -f -- "$MNT"/EFI/BOOT/*.new
+
+if (( ! DIFF )); then
+  # niente da copiare: allinea solo il marker di versione
+  if [[ "$OLD_VER" != "$NEW_VER" ]]; then
+    printf '%s\n' "$NEW_VER" > "$MARK.new" && mv -f -- "$MARK.new" "$MARK"
+    echo "versione registrata sulla ESP: $NEW_VER"
+  else
+    echo "nulla da fare"
+  fi
+  sync
+  exit 0
+fi
+
+command -v sbverify >/dev/null 2>&1 || die "sbverify non trovato (sbsigntools): non tocco la ESP"
+sbverify --list "$SHIM_SRC" 2>&1 | grep -qi 'Microsoft' \
+  || die "shim dell'immagine senza firma Microsoft: non tocco la ESP"
+sbverify --list "$MM_SRC" 2>&1 | grep -q 'image signature' \
+  || die "MokManager dell'immagine non firmato: non tocco la ESP"
+
+if (( ! FORCE )); then
+  if [[ -n "$OLD_VER" ]]; then
+    newest="$(printf '%s\n%s\n' "$OLD_VER" "$NEW_VER" | sort -V | tail -n1)"
+    [[ "$newest" == "$NEW_VER" ]] \
+      || die "l'immagine ha shim $NEW_VER, piu' vecchio di quello sulla ESP ($OLD_VER): rifiuto (usa --force per forzare)"
+  else
+    [[ -t 0 ]] || die "versione di shim sulla ESP sconosciuta e nessun terminale per confermare: rifiuto"
+    read -rp "Versione di shim sulla ESP sconosciuta: aggiorno a $NEW_VER? [y/N] " ans
+    [[ "$ans" == y || "$ans" == Y ]] || die "annullato"
+  fi
+fi
+
+replace() {
+  local src="$1" dst="$2" tmp="$2.new"
+  [[ -f "$dst" ]] && cp -pf -- "$dst" "$dst.prev"
+  cp -- "$src" "$tmp"
+  sync -f "$tmp"
+  cmp -s "$src" "$tmp" || { rm -f "$tmp"; die "copia corrotta: $dst"; }
+  mv -f -- "$tmp" "$dst"
+  echo "aggiornato: ${dst#$MNT/}"
+}
+
+cmp -s "$SHIM_SRC" "$SHIM_DST" || replace "$SHIM_SRC" "$SHIM_DST"
+cmp -s "$MM_SRC"   "$MM_DST"   || replace "$MM_SRC" "$MM_DST"
+
+printf '%s\n' "$NEW_VER" > "$MARK.new" && mv -f -- "$MARK.new" "$MARK"
+sync
+echo "shim/MokManager aggiornati alla versione $NEW_VER."
+echo "Se il prossimo avvio fallisse: da live USB copia EFI/BOOT/BOOTX64.EFI.prev su EFI/BOOT/BOOTX64.EFI (e mmx64.efi.prev su mmx64.efi)."
