@@ -18,8 +18,6 @@ install:
     - xdg-desktop-portal-gtk
     - xdg-user-dirs-gtk
     - gnome-initial-setup
-    - plymouth-system-theme
-    - plymouth-theme-spinner
     - NetworkManager
     - NetworkManager-wifi
     - NetworkManager-bluetooth
