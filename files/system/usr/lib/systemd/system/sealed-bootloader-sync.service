@@ -1,5 +1,5 @@
 [Unit]
-Description=Allinea systemd-boot firmato dell'immagine con la ESP (e controlla shim)
+Description=Allinea systemd-boot, shim e MokManager firmati dell'immagine con la ESP
 ConditionPathExists=/sys/firmware/efi
 ConditionPathExists=/usr/lib/systemd/boot/efi/systemd-bootx64.efi
 After=local-fs.target
@@ -7,8 +7,7 @@ After=local-fs.target
 [Service]
 Type=oneshot
 ExecStart=/usr/libexec/sealed-bootloader-sync
-# solo controllo e avviso su shim/MokManager; il '-' ignora eventuali errori
-ExecStart=-/usr/libexec/sealed-shim-sync
+ExecStart=/usr/libexec/sealed-shim-sync --auto
 
 [Install]
 WantedBy=multi-user.target

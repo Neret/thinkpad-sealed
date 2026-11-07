@@ -4,7 +4,9 @@
 #
 # Uso:
 #   sealed-shim-sync                 solo controllo: avvisa se diversi, non scrive nulla (exit 0)
-#   sealed-shim-sync --apply         aggiorna shim e MokManager con le protezioni sotto
+#   sealed-shim-sync --auto          come --apply ma senza domande: e' quello che lancia la unit a ogni boot
+#                                    (versione piu' vecchia = non aggiorna e basta, exit 0)
+#   sealed-shim-sync --apply         aggiorna shim e MokManager con le protezioni sotto, con conferma
 #   sealed-shim-sync --apply --force salta il rifiuto di scendere di versione / la conferma
 #
 # Protezioni di --apply:
@@ -20,11 +22,14 @@ ESP_DEV="${ESP_DEV:-/dev/disk/by-partlabel/ESP}"
 
 MODE=check
 FORCE=0
+AUTO=0
 for a in "$@"; do
   case "$a" in
+    --check) MODE=check ;;
     --apply) MODE=apply ;;
+    --auto)  MODE=apply; AUTO=1 ;;
     --force) FORCE=1 ;;
-    *) echo "uso: ${0##*/} [--apply [--force]]" >&2; exit 2 ;;
+    *) echo "uso: ${0##*/} [--check | --apply [--force] | --auto]" >&2; exit 2 ;;
   esac
 done
 
@@ -101,8 +106,15 @@ sbverify --list "$MM_SRC" 2>&1 | grep -q 'image signature' \
 if (( ! FORCE )); then
   if [[ -n "$OLD_VER" ]]; then
     newest="$(printf '%s\n%s\n' "$OLD_VER" "$NEW_VER" | sort -V | tail -n1)"
-    [[ "$newest" == "$NEW_VER" ]] \
-      || die "l'immagine ha shim $NEW_VER, piu' vecchio di quello sulla ESP ($OLD_VER): rifiuto (usa --force per forzare)"
+    if [[ "$newest" != "$NEW_VER" ]]; then
+      if (( AUTO )); then
+        echo "shim dell'immagine ($NEW_VER) piu' vecchio di quello sulla ESP ($OLD_VER): non aggiorno"
+        exit 0
+      fi
+      die "l'immagine ha shim $NEW_VER, piu' vecchio di quello sulla ESP ($OLD_VER): rifiuto (usa --force per forzare)"
+    fi
+  elif (( AUTO )); then
+    echo "versione di shim sulla ESP sconosciuta (primo giro con questo controllo): aggiorno a $NEW_VER"
   else
     [[ -t 0 ]] || die "versione di shim sulla ESP sconosciuta e nessun terminale per confermare: rifiuto"
     read -rp "Versione di shim sulla ESP sconosciuta: aggiorno a $NEW_VER? [y/N] " ans
