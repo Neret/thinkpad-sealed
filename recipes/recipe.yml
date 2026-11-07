@@ -32,7 +32,6 @@ modules:
         - bluetooth.service
         - firewalld.service
         - sealed-sync.service
-        - sealed-upgrade.timer
       disabled:
         - sshd.service
 
