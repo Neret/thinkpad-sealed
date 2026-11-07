@@ -3,8 +3,11 @@
 # (EFI/systemd/systemd-bootx64.efi e EFI/BOOT/grubx64.efi, quello che carica shim).
 # Va in: files/system/usr/libexec/sealed-bootloader-sync (eseguibile)
 #
-# La verifica della firma e' OBBLIGATORIA: senza sbverify, senza certificato
-# o con firma non valida lo script esce con errore e non tocca la ESP.
+# - La verifica della firma e' OBBLIGATORIA: senza sbverify/sbattach, senza certificato
+#   o con firma non valida lo script esce con errore e non tocca la ESP.
+# - Il confronto e' sul binario SENZA firma: se la build ha solo rifirmato lo stesso
+#   systemd-boot, la ESP non viene riscritta. Una copia sulla ESP e' considerata
+#   allineata solo se il binario e' identico E la sua firma e' valida con MOK.crt.
 # Richiede: pacchetto sbsigntools e /usr/share/sealed/MOK.crt (PEM, pubblico) nell'immagine.
 set -euo pipefail
 
@@ -14,12 +17,14 @@ CERT=/usr/share/sealed/MOK.crt
 
 die() { echo "sealed-bootloader-sync: $*" >&2; exit 1; }
 
-[[ -s "$SRC" ]]  || die "sorgente mancante: $SRC"
+[[ -s "$SRC" ]]     || die "sorgente mancante: $SRC"
 [[ -b "$ESP_DEV" ]] || die "ESP non trovata: $ESP_DEV"
 
 # --- verifica firma obbligatoria, PRIMA di montare o scrivere qualsiasi cosa ---
 command -v sbverify >/dev/null 2>&1 \
   || die "sbverify non trovato (aggiungi sbsigntools a packages.yml): non tocco la ESP"
+command -v sbattach >/dev/null 2>&1 \
+  || die "sbattach non trovato (aggiungi sbsigntools a packages.yml): non tocco la ESP"
 [[ -s "$CERT" ]] \
   || die "certificato $CERT mancante (aggiungilo in files/system/usr/share/sealed/): non tocco la ESP"
 sbverify --cert "$CERT" "$SRC" >/dev/null 2>&1 \
@@ -27,11 +32,27 @@ sbverify --cert "$CERT" "$SRC" >/dev/null 2>&1 \
 echo "firma valida: $SRC"
 
 MNT="$(mktemp -d /run/sealed-esp.XXXXXX)"
+WORK="$(mktemp -d /run/sealed-work.XXXXXX)"
 cleanup() {
   mountpoint -q "$MNT" && umount "$MNT" || true
   rmdir "$MNT" 2>/dev/null || true
+  rm -rf "$WORK"
 }
 trap cleanup EXIT
+
+# binario sorgente senza firma, calcolato una volta sola
+cp -- "$SRC" "$WORK/src.efi"
+sbattach --remove "$WORK/src.efi" >/dev/null 2>&1 || die "impossibile togliere la firma da $SRC"
+
+# allineato = stesso binario (senza firma) E firma valida con MOK.crt
+aligned() {
+  local dst="$1"
+  [[ -f "$dst" ]] || return 1
+  cp -- "$dst" "$WORK/dst.efi" || return 1
+  sbattach --remove "$WORK/dst.efi" >/dev/null 2>&1 || return 1
+  cmp -s "$WORK/src.efi" "$WORK/dst.efi" || return 1
+  sbverify --cert "$CERT" "$dst" >/dev/null 2>&1
+}
 
 mount -o rw,nosuid,nodev,noexec "$ESP_DEV" "$MNT"
 mkdir -p "$MNT/EFI/systemd" "$MNT/EFI/BOOT"
@@ -48,7 +69,7 @@ done
 
 replace() {
   local dst="$1" tmp="$1.new"
-  if [[ -f "$dst" ]] && cmp -s "$SRC" "$dst"; then
+  if aligned "$dst"; then
     echo "gia' allineato: ${dst#$MNT/}"
     return 0
   fi
@@ -62,10 +83,11 @@ replace() {
   echo "aggiornato: ${dst#$MNT/}"
 }
 
-# backup del vecchio binario (non e' in un percorso di boot: serve solo per recupero da live USB)
+# backup del vecchio binario solo se sta per essere sostituito
+# (non e' in un percorso di boot: serve solo per recupero da live USB)
 if [[ -f "$MNT/EFI/systemd/systemd-bootx64.efi" ]] \
-   && ! cmp -s "$SRC" "$MNT/EFI/systemd/systemd-bootx64.efi"; then
-  cp -f -- "$MNT/EFI/systemd/systemd-bootx64.efi" "$MNT/EFI/systemd/systemd-bootx64.efi.prev"
+   && ! aligned "$MNT/EFI/systemd/systemd-bootx64.efi"; then
+  cp -pf -- "$MNT/EFI/systemd/systemd-bootx64.efi" "$MNT/EFI/systemd/systemd-bootx64.efi.prev"
 fi
 
 replace "$MNT/EFI/systemd/systemd-bootx64.efi"
