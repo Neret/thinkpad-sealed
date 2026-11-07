@@ -31,7 +31,9 @@ modules:
         - systemd-resolved.service
         - bluetooth.service
         - firewalld.service
-        - sealed-bootloader-sync.service
+        - sealed-sync@bootloader.service
+        - sealed-sync@shim.service
+        - sealed-sync@mokmanager.service
       disabled:
         - sshd.service
 

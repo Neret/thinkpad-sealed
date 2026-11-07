@@ -1,0 +1,59 @@
+#!/usr/bin/bash
+# Funzioni comuni degli script sealed-sync-* (si usa con "source", non va eseguito).
+# Va in: files/system/usr/libexec/sealed-sync-lib
+#
+# - esp_open: prende un lock (gli script non scrivono mai in parallelo), monta la ESP in rw
+#   su una cartella temporanea e pulisce i *.new rimasti da copie interrotte.
+# - sync_file: se il file sulla ESP e' identico alla sorgente non fa niente; altrimenti salva
+#   il vecchio come <file>.prev, copia su <file>.new, controlla con cmp e sostituisce con mv.
+
+ESP_DEV="${ESP_DEV:-/dev/disk/by-partlabel/ESP}"
+CERT="${CERT:-/usr/share/sealed/MOK.crt}"
+MNT=""
+
+die() { echo "${0##*/}: $*" >&2; exit 1; }
+
+need_sbverify() {
+  command -v sbverify >/dev/null 2>&1 \
+    || die "sbverify non trovato (aggiungi sbsigntools a packages.yml): non tocco la ESP"
+}
+
+esp_close() {
+  [[ -n "$MNT" ]] || return 0
+  mountpoint -q "$MNT" && umount "$MNT" || true
+  rmdir "$MNT" 2>/dev/null || true
+}
+
+esp_open() {
+  [[ -b "$ESP_DEV" ]] || die "ESP non trovata: $ESP_DEV"
+  exec 9>/run/sealed-esp.lock
+  flock 9
+  MNT="$(mktemp -d /run/sealed-esp.XXXXXX)"
+  trap esp_close EXIT
+  mount -o rw,nosuid,nodev,noexec "$ESP_DEV" "$MNT"
+  mkdir -p "$MNT/EFI/systemd" "$MNT/EFI/BOOT"
+  rm -f -- "$MNT"/EFI/systemd/*.new "$MNT"/EFI/BOOT/*.new
+}
+
+sync_file() {
+  local src="$1" dst="$2" tmp="$2.new"
+  if [[ -f "$dst" ]] && cmp -s "$src" "$dst"; then
+    echo "gia' allineato: ${dst#$MNT/}"
+    return 0
+  fi
+  [[ -f "$dst" ]] && cp -pf -- "$dst" "$dst.prev"
+  cp -- "$src" "$tmp"
+  sync -f "$tmp"
+  cmp -s "$src" "$tmp" || { rm -f "$tmp"; die "copia corrotta: $dst"; }
+  mv -f -- "$tmp" "$dst"
+  echo "aggiornato: ${dst#$MNT/}"
+}
+
+# shim e MokManager: cartella piu' recente del pacchetto shim-x64 nell'immagine
+shim_dir() {
+  local v
+  v="$(ls -1 /usr/lib/efi/shim 2>/dev/null | sort -V | tail -n1 || true)"
+  [[ -n "$v" ]] || die "nessuna versione in /usr/lib/efi/shim (shim-x64 non nell'immagine?)"
+  SHIM_VER="$v"
+  SHIM_DIR="/usr/lib/efi/shim/$v/EFI/fedora"
+}

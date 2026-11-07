@@ -1,0 +1,18 @@
+#!/usr/bin/bash
+# Copia MokManager (mmx64.efi, firmato dal vendor) dell'immagine in EFI/BOOT/mmx64.efi.
+# Va in: files/system/usr/libexec/sealed-sync-mokmanager (eseguibile)
+set -euo pipefail
+source "${SEALED_LIB:-/usr/libexec/sealed-sync-lib}"
+
+shim_dir
+SRC="$SHIM_DIR/mmx64.efi"
+[[ -s "$SRC" ]] || die "manca $SRC"
+
+need_sbverify
+sbverify --list "$SRC" 2>&1 | grep -q 'image signature' \
+  || die "MokManager dell'immagine non firmato: non tocco la ESP"
+echo "MokManager firmato: $SHIM_VER"
+
+esp_open
+sync_file "$SRC" "$MNT/EFI/BOOT/mmx64.efi"
+sync

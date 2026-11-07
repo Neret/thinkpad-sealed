@@ -1,0 +1,40 @@
+#!/usr/bin/bash
+# Copia lo shim dell'immagine (firmato Microsoft) in EFI/BOOT/BOOTX64.EFI.
+# Rifiuta di scendere a una versione piu' vecchia di quella registrata sulla ESP
+# (EFI/BOOT/shim-version.txt): in quel caso non fa niente e esce con successo.
+# Va in: files/system/usr/libexec/sealed-sync-shim (eseguibile)
+set -euo pipefail
+source "${SEALED_LIB:-/usr/libexec/sealed-sync-lib}"
+
+shim_dir
+SRC="$SHIM_DIR/shimx64.efi"
+[[ -s "$SRC" ]] || die "manca $SRC"
+
+need_sbverify
+sbverify --list "$SRC" 2>&1 | grep -qi 'Microsoft' \
+  || die "shim dell'immagine senza firma Microsoft: non tocco la ESP"
+echo "firma Microsoft presente: shim $SHIM_VER"
+
+esp_open
+DST="$MNT/EFI/BOOT/BOOTX64.EFI"
+MARK="$MNT/EFI/BOOT/shim-version.txt"
+OLD_VER="$(cat "$MARK" 2>/dev/null || true)"
+
+if [[ -n "$OLD_VER" ]]; then
+  newest="$(printf '%s\n%s\n' "$OLD_VER" "$SHIM_VER" | sort -V | tail -n1)"
+  if [[ "$newest" != "$SHIM_VER" ]]; then
+    echo "shim dell'immagine ($SHIM_VER) piu' vecchio di quello sulla ESP ($OLD_VER): non aggiorno"
+    exit 0
+  fi
+else
+  echo "versione di shim sulla ESP sconosciuta (primo giro): proseguo con $SHIM_VER"
+fi
+
+sync_file "$SRC" "$DST"
+
+if [[ "$OLD_VER" != "$SHIM_VER" ]]; then
+  printf '%s\n' "$SHIM_VER" > "$MARK.new"
+  mv -f -- "$MARK.new" "$MARK"
+  echo "versione registrata sulla ESP: $SHIM_VER"
+fi
+sync

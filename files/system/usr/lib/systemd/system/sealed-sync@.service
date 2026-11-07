@@ -1,0 +1,11 @@
+[Unit]
+Description=Allinea %i dell'immagine con la ESP
+ConditionPathExists=/sys/firmware/efi
+After=local-fs.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/libexec/sealed-sync-%i
+
+[Install]
+WantedBy=multi-user.target
