@@ -1,0 +1,12 @@
+[Unit]
+Description=Allinea systemd-boot firmato dell'immagine con la ESP
+ConditionPathExists=/sys/firmware/efi
+ConditionPathExists=/usr/lib/systemd/boot/efi/systemd-bootx64.efi
+After=local-fs.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/libexec/sealed-bootloader-sync
+
+[Install]
+WantedBy=multi-user.target

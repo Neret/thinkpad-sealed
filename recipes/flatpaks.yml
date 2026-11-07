@@ -16,7 +16,6 @@ configurations:
       - org.gnome.Calculator
       - org.gnome.Calendar
       - org.gnome.clocks
-      - org.gnome.Contacts
       - org.gnome.Decibels
       - org.gnome.FileRoller
       - org.gnome.Firmware
@@ -24,7 +23,6 @@ configurations:
       - org.gnome.Loupe
       - org.gnome.Maps
       - org.gnome.Papers
-      - org.gnome.SimpleScan
       - org.gnome.Snapshot
       - org.gnome.TextEditor
       - org.gnome.Weather

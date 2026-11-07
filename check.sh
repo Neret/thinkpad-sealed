@@ -228,15 +228,27 @@ done
 mapfile -t UKIS < <(find "$ESP_MNT/EFI/Linux" -type f -name '*.efi' 2>/dev/null | sort)
 if (( ${#UKIS[@]} > 0 )); then
   ok "UKI trovate: ${#UKIS[@]}"
-  for u in "${UKIS[@]}"; do echo "    ${u#$ESP_MNT/}  ($(du -h "$u" | cut -f1))"; done
-  UKI="${UKIS[0]}"
+  for u in "${UKIS[@]}"; do
+    echo "    ${u#$ESP_MNT/}  ($(du -h "$u" | cut -f1), $(date -r "$u" '+%F %H:%M'))"
+  done
 else
   err "nessuna UKI in EFI/Linux"
-  UKI=""
 fi
 
 cmp -s "$ESP_MNT/EFI/systemd/systemd-bootx64.efi" "$ESP_MNT/EFI/BOOT/grubx64.efi" \
   && ok "grubx64.efi == systemd-bootx64.efi" || err "grubx64.efi diverso da systemd-bootx64.efi"
+
+# Bootloader sulla ESP vs quello dell'immagine in uso (solo se questo avvio e' composefs)
+IMG_SDB=/usr/lib/systemd/boot/efi/systemd-bootx64.efi
+if [[ -f "$IMG_SDB" ]] && grep -q 'composefs' /proc/cmdline; then
+  if cmp -s "$IMG_SDB" "$ESP_MNT/EFI/systemd/systemd-bootx64.efi"; then
+    ok "systemd-boot sulla ESP == quello dell'immagine in uso"
+  else
+    warn "systemd-boot sulla ESP diverso da quello dell'immagine in uso (sealed-bootloader-sync non ancora eseguito?)"
+  fi
+else
+  warn "confronto bootloader ESP/immagine saltato (non avviato dall'immagine composefs)"
+fi
 
 if file -b "$MOK_CERT" | grep -qi PEM; then
   err "il MOK.cer fornito e' PEM (serve DER)"
@@ -260,7 +272,9 @@ verify_mok() {
 }
 verify_mok EFI/systemd/systemd-bootx64.efi
 verify_mok EFI/BOOT/grubx64.efi
-[[ -n "$UKI" ]] && verify_mok "${UKI#$ESP_MNT/}"
+for u in "${UKIS[@]}"; do
+  verify_mok "${u#$ESP_MNT/}"
+done
 
 out="$("$RUNTIME" run --rm --security-opt label=disable -v "$ESP_MNT":/esp:ro "$TOOLS" \
       sbverify --list /esp/EFI/BOOT/BOOTX64.EFI 2>&1)"
@@ -269,33 +283,61 @@ out="$("$RUNTIME" run --rm --security-opt label=disable -v "$ESP_MNT":/esp:ro "$
       sbverify --list /esp/EFI/BOOT/mmx64.efi 2>&1)"
 grep -q 'image signature' <<<"$out" && ok "MokManager firmato (chiave vendor)" || err "MokManager non firmato"
 
-log "5. Command line della UKI"
-DIG=""
-if [[ -n "$UKI" ]]; then
-  DIG="$(grep -aoE 'composefs=[0-9a-f]+' "$UKI" | head -n1 | cut -d= -f2 || true)"
-  [[ -n "$DIG" ]] && ok "composefs=${DIG:0:16}... presente" || err "composefs= assente nella UKI"
-  grep -aqE 'composefs\.digest=v1-sha512-12:[0-9a-f]+' "$UKI" \
-    && ok "composefs.digest=v1-... presente" || warn "composefs.digest=v1-... assente"
-  grep -aq 'rd.luks.options=tpm2-device=auto' "$UKI" \
-    && ok "rd.luks.options=tpm2-device=auto presente" || warn "rd.luks.options assente"
-  grep -aq 'root=' "$UKI" \
-    && warn "la UKI contiene root=: con root autodiscovery di solito non serve" \
-    || ok "nessun root= (autodiscovery dal tipo di partizione)"
+log "5. Ogni UKI: command line, immagine composefs, deployment in uso"
+BOOTED_V1="$(tr ' ' '\n' </proc/cmdline | sed -n 's/^composefs\.digest=v1-sha512-12://p' | head -n1)"
+FOUND_BOOTED=0
+
+for u in "${UKIS[@]}"; do
+  name="${u##*/}"
+  id="${name#bootc_composefs-}"
+  id="${id:0:12}"
+  echo "  --- UKI $id"
+
+  dig="$(grep -aoE 'composefs=[0-9a-f]+' "$u" | head -n1 | cut -d= -f2 || true)"
+  dv1="$(grep -aoE 'composefs\.digest=v1-sha512-12:[0-9a-f]+' "$u" | head -n1 | cut -d: -f2 || true)"
+
+  [[ -n "$dig" ]] && ok "[$id] composefs=${dig:0:16}... presente" || err "[$id] composefs= assente nella UKI"
+
+  if [[ -n "$dv1" ]]; then
+    ok "[$id] composefs.digest=v1-... presente"
+    [[ "$name" == *"$dv1"* ]] \
+      && ok "[$id] il nome file coincide col composefs.digest" \
+      || warn "[$id] il nome file non coincide col composefs.digest"
+  else
+    warn "[$id] composefs.digest=v1-... assente"
+  fi
+
+  img=""
+  for d in "$dig" "$dv1"; do
+    if [[ -n "$d" && -e "$ROOT_MNT/composefs/images/$d" ]]; then img="$d"; break; fi
+  done
+  [[ -n "$img" ]] \
+    && ok "[$id] immagine composefs installata (${img:0:12}...)" \
+    || err "[$id] nessuna immagine composefs corrispondente in $ROOT_MNT/composefs/images"
+
+  grep -aq 'rd.luks.options=tpm2-device=auto' "$u" \
+    && ok "[$id] rd.luks.options=tpm2-device=auto presente" || warn "[$id] rd.luks.options assente"
+  grep -aq 'root=' "$u" \
+    && warn "[$id] la UKI contiene root=: con root autodiscovery di solito non serve" \
+    || ok "[$id] nessun root= (autodiscovery dal tipo di partizione)"
+
+  if [[ -n "$BOOTED_V1" && "$dv1" == "$BOOTED_V1" ]]; then
+    ok "[$id] e' la UKI in uso (corrisponde a /proc/cmdline)"
+    FOUND_BOOTED=1
+  fi
+done
+
+if [[ -n "$BOOTED_V1" ]]; then
+  (( FOUND_BOOTED == 1 )) \
+    && ok "il deployment in uso corrisponde a una UKI sulla ESP" \
+    || err "il composefs.digest di /proc/cmdline non corrisponde a nessuna UKI sulla ESP"
+else
+  warn "avvio non composefs: confronto con /proc/cmdline saltato"
 fi
 
 log "6. Contenuto della root"
 ls -A "$ROOT_MNT" | sed 's/^/    /'
 [[ -n "$(ls -A "$ROOT_MNT")" ]] && ok "la root contiene dati" || err "la root e' vuota"
-if [[ -n "$DIG" ]]; then
-  hit="$(find "$ROOT_MNT" -maxdepth 5 -name "*${DIG}*" 2>/dev/null | head -n 3)"
-  if [[ -n "$hit" ]]; then
-    ok "il digest della UKI corrisponde a un deployment installato:"
-    sed "s|$ROOT_MNT|    <root>|" <<<"$hit"
-  else
-    warn "non trovo il digest della UKI tra i deployment (controlla a mano sotto)"
-    find "$ROOT_MNT" -maxdepth 3 \( -path '*/state/*' -o -path '*/composefs/*' \) 2>/dev/null | head -n 12 | sed 's/^/    /'
-  fi
-fi
 
 log "7. Firmware (stato di QUESTO avvio)"
 if [[ -d /sys/firmware/efi ]]; then
