@@ -1,5 +1,8 @@
 #!/usr/bin/bash
-set -euo pipefail
+# Shared helpers: this file is sourced, never executed.
+# It must not change the caller's shell options (each script sets its own).
+
+# shellcheck disable=SC2034  # SHIM_VER / SHIM_DIR are read by the scripts that source this file
 
 ROOT="${SEALED_ROOT:-}"
 CERT="${CERT:-$ROOT/usr/share/sealed/MOK.crt}"
@@ -10,7 +13,7 @@ ESP_MOUNTED=0
 LOADER_UUID_VAR=/sys/firmware/efi/efivars/LoaderDevicePartUUID-4a67b082-0a4c-41cf-b6c7-440b29bb8c4f
 
 die() {
-    echo "${0##*/}: $*" >&2
+    log_err "${component:-${0##*/}}" "$*"
     exit 1
 }
 
@@ -28,7 +31,13 @@ log() {
         return 0
     fi
 
-    printf '%s: %s: %s\n' "$level" "$component" "$*" >&2
+    if [[ -n "${JOURNAL_STREAM:-}" ]]; then
+        # under systemd: numeric syslog prefix, so "journalctl -p warning" works
+        local -A prio=([emerg]=0 [alert]=1 [crit]=2 [err]=3 [warning]=4 [notice]=5 [info]=6 [debug]=7)
+        printf '<%s>%s: %s\n' "${prio[$level]}" "$component" "$*" >&2
+    else
+        printf '%s: %s: %s\n' "$level" "$component" "$*" >&2
+    fi
 }
 
 log_debug()   { log debug   "$@"; }
@@ -37,6 +46,20 @@ log_notice()  { log notice  "$@"; }
 log_warning() { log warning "$@"; }
 log_err()     { log err     "$@"; }
 log_crit()    { log crit    "$@"; }
+
+need_sbattach() {
+    command -v sbattach >/dev/null 2>&1 || die "sbattach not found (install the sbsigntools package)"
+}
+
+# unsigned_sha FILE: sha256 of a PE binary with its signature stripped.
+# If stripping fails the hash includes the signature: that only causes an extra copy, never a skipped one.
+unsigned_sha() {
+    local tmp
+    tmp="$(mktemp)" || return 1
+    { cp -- "$1" "$tmp" && sbattach --remove "$tmp" >/dev/null 2>&1; } || true
+    sha256sum <"$tmp" | cut -d' ' -f1
+    rm -f -- "$tmp"
+}
 
 need_sbverify() {
     command -v sbverify >/dev/null 2>&1 || die "sbverify not found (install the sbsigntools package)"
@@ -121,12 +144,12 @@ sync_file() {
     local avail
 
     if [[ -f "$dst" ]] && cmp -s "$src" "$dst"; then
-        log_info sync "already aligned: ${dst#$MNT/}"
+        log_info sync "already aligned: ${dst#"$MNT"/}"
         return 0
     fi
 
     if [[ "$DRY_RUN" == 1 ]]; then
-        log_info sync "would update: ${dst#$MNT/}"
+        log_info sync "would update: ${dst#"$MNT"/}"
         return 0
     fi
 
@@ -150,7 +173,26 @@ sync_file() {
     fi
 
     mv -f -- "$tmp" "$dst"
-    log_info sync "updated: ${dst#$MNT/}"
+    log_info sync "updated: ${dst#"$MNT"/}"
+}
+
+# sync_signed_file SRC DST: for binaries re-signed at every build.
+# The ESP file is left alone when it has the same binary as SRC (signature ignored)
+# AND its signature verifies with $CERT. It is replaced when the binary changed or
+# when its signature no longer verifies (e.g. after a MOK rotation).
+# SRC must already have been verified by the caller.
+sync_signed_file() {
+    local src="$1" dst="$2"
+
+    if [[ -f "$dst" && "$(unsigned_sha "$src")" == "$(unsigned_sha "$dst")" ]]; then
+        if sbverify --cert "$CERT" "$dst" >/dev/null 2>&1; then
+            log_info "$component" "already aligned: ${dst#"$MNT"/} (same binary, valid signature)"
+            return 0
+        fi
+        log_warning "$component" "${dst#"$MNT"/}: same binary but signature not valid for $CERT: replacing"
+    fi
+
+    sync_file "$src" "$dst"
 }
 
 put_text() {
@@ -158,7 +200,7 @@ put_text() {
     local tmp="$1.new"
 
     if [[ "$DRY_RUN" == 1 ]]; then
-        log_info sync "would write: ${dst#$MNT/}"
+        log_info sync "would write: ${dst#"$MNT"/}"
         return 0
     fi
 
@@ -170,7 +212,7 @@ put_text() {
 shim_dir() {
     local v
 
-    v="$(ls -1 "$ROOT/usr/lib/efi/shim" 2>/dev/null | sort -V | tail -n1 || true)"
+    v="$(find "$ROOT/usr/lib/efi/shim" -mindepth 1 -maxdepth 1 -type d -printf '%f\n' 2>/dev/null | sort -V | tail -n1 || true)"
     [[ -n "$v" ]] || die "no shim version found in /usr/lib/efi/shim (is shim-x64 installed in the image?)"
 
     SHIM_VER="$v"

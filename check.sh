@@ -29,8 +29,11 @@ ROOT_MNT=""
 ESP_MNT=""
 ROOT_OPENED=0
 ESP_MOUNTED=0
+STAGE=""
 
 cleanup() {
+  [[ -n "$STAGE" ]] && rm -rf "$STAGE"
+
   if [[ -n "$ESP_MNT" && "$ESP_MOUNTED" == 1 ]]; then
     umount "$ESP_MNT" 2>/dev/null || true
   fi
@@ -41,7 +44,9 @@ cleanup() {
   fi
 }
 
-trap cleanup EXIT INT TERM
+trap cleanup EXIT
+trap 'exit 130' INT
+trap 'exit 143' TERM
 
 [[ $EUID -eq 0 ]] || { err "Esegui come root (sudo)."; exit 1; }
 [[ "$(uname -m)" == "x86_64" ]] || { err "Supportato solo UEFI x86_64."; exit 1; }
@@ -56,7 +61,7 @@ else
 fi
 
 DISK="$(ask 'Disco da verificare' '/dev/nvme0n1')"
-MOK_CERT="$(ask 'Certificato MOK DER' './MOK.cer')"
+MOK_CERT="$(ask 'Certificato MOK DER' './secureboot/MOK.cer')"
 
 ESP="${DISK}p1"
 ROOT="${DISK}p2"
@@ -69,7 +74,7 @@ if ! "$RUNTIME" image inspect "$TOOLS" >/dev/null 2>&1; then
   BUILD_DIR="$(mktemp -d)"
   cat > "$BUILD_DIR/Containerfile" <<EOF
 FROM ${TOOLS_BASE}
-RUN dnf install -y dosfstools btrfs-progs sbsigntools openssl shim-x64 \
+RUN dnf install -y dosfstools btrfs-progs sbsigntools openssl \
     && dnf clean all
 EOF
   "$RUNTIME" build -q -t "$TOOLS" "$BUILD_DIR" >/dev/null
@@ -235,42 +240,87 @@ else
   err "nessuna UKI in EFI/Linux"
 fi
 
-cmp -s "$ESP_MNT/EFI/systemd/systemd-bootx64.efi" "$ESP_MNT/EFI/BOOT/grubx64.efi" \
-  && ok "grubx64.efi == systemd-bootx64.efi" || err "grubx64.efi diverso da systemd-bootx64.efi"
-
-# Bootloader sulla ESP vs quello dell'immagine in uso (solo se questo avvio e' composefs)
+# Confronto sul binario senza firma (sbattach --remove nel container strumenti): il bootloader
+# viene firmato di nuovo a ogni build e sealed-sync lo copia solo se cambia il binario.
+STAGE="$(mktemp -d)"
 IMG_SDB=/usr/lib/systemd/boot/efi/systemd-bootx64.efi
-if [[ -f "$IMG_SDB" ]] && grep -q 'composefs' /proc/cmdline; then
-  if cmp -s "$IMG_SDB" "$ESP_MNT/EFI/systemd/systemd-bootx64.efi"; then
-    ok "systemd-boot sulla ESP == quello dell'immagine in uso"
+IN_IMAGE=0
+grep -q 'composefs' /proc/cmdline && [[ -f "$IMG_SDB" ]] && IN_IMAGE=1
+cp "$ESP_MNT/EFI/systemd/systemd-bootx64.efi" "$STAGE/esp-sdb.efi" 2>/dev/null
+cp "$ESP_MNT/EFI/BOOT/grubx64.efi"            "$STAGE/esp-grub.efi" 2>/dev/null
+(( IN_IMAGE )) && cp "$IMG_SDB" "$STAGE/img-sdb.efi"
+declare -A UHASH=()
+while read -r name h; do
+  UHASH["$name"]="$h"
+done < <("$RUNTIME" run --rm --security-opt label=disable -v "$STAGE":/s "$TOOLS" sh -c '
+  cd /s && for f in *.efi; do
+    sbattach --remove "$f" >/dev/null 2>&1
+    printf "%s %s\n" "$f" "$(sha256sum <"$f" | cut -d" " -f1)"
+  done')
+
+if [[ -n "${UHASH[esp-sdb.efi]:-}" && "${UHASH[esp-sdb.efi]}" == "${UHASH[esp-grub.efi]:-x}" ]]; then
+  ok "grubx64.efi == systemd-bootx64.efi (stesso binario)"
+else
+  err "grubx64.efi diverso da systemd-bootx64.efi"
+fi
+
+if (( IN_IMAGE )); then
+  if [[ "${UHASH[img-sdb.efi]:-}" == "${UHASH[esp-sdb.efi]:-x}" ]]; then
+    ok "systemd-boot sulla ESP == quello dell'immagine in uso (stesso binario; la firma puo' differire)"
   else
-    warn "systemd-boot sulla ESP diverso da quello dell'immagine in uso (sealed-bootloader-sync non ancora eseguito?)"
+    warn "systemd-boot sulla ESP diverso da quello dell'immagine in uso: sealed-sync lo allinea al prossimo boot (o: sudo /usr/libexec/sealed-sync bootloader)"
   fi
 else
   warn "confronto bootloader ESP/immagine saltato (non avviato dall'immagine composefs)"
 fi
 
-# shim e MokManager sulla ESP vs quelli dell'immagine in uso (aggiornamento: sealed-shim-sync --apply)
+# shim e MokManager: copiati interi dal pacchetto, quindi si confrontano i byte
 SHIM_DIR="$(ls -d /usr/lib/efi/shim/*/EFI/fedora 2>/dev/null | sort -V | tail -n1 || true)"
-if [[ -n "$SHIM_DIR" ]] && grep -q 'composefs' /proc/cmdline; then
+if [[ -n "$SHIM_DIR" ]] && (( IN_IMAGE )); then
   SHIM_VER="${SHIM_DIR#/usr/lib/efi/shim/}"; SHIM_VER="${SHIM_VER%%/*}"
   cmp -s "$SHIM_DIR/shimx64.efi" "$ESP_MNT/EFI/BOOT/BOOTX64.EFI" \
     && ok "shim sulla ESP == quello dell'immagine ($SHIM_VER)" \
-    || warn "shim sulla ESP diverso da quello dell'immagine ($SHIM_VER): sudo /usr/libexec/sealed-shim-sync --apply"
+    || warn "shim sulla ESP diverso da quello dell'immagine ($SHIM_VER): sealed-sync lo allinea al prossimo boot (o: sudo /usr/libexec/sealed-sync shim)"
   cmp -s "$SHIM_DIR/mmx64.efi" "$ESP_MNT/EFI/BOOT/mmx64.efi" \
     && ok "MokManager sulla ESP == quello dell'immagine ($SHIM_VER)" \
-    || warn "MokManager sulla ESP diverso da quello dell'immagine ($SHIM_VER): sudo /usr/libexec/sealed-shim-sync --apply"
+    || warn "MokManager sulla ESP diverso da quello dell'immagine ($SHIM_VER): sealed-sync lo allinea al prossimo boot (o: sudo /usr/libexec/sealed-sync mokmanager)"
+  ESP_SHIM_VER="$(cat "$ESP_MNT/EFI/BOOT/shim-version.txt" 2>/dev/null || true)"
+  if [[ -z "$ESP_SHIM_VER" ]]; then
+    warn "EFI/BOOT/shim-version.txt assente: sealed-sync lo scrive al prossimo boot"
+  elif [[ "$ESP_SHIM_VER" == "$SHIM_VER" ]]; then
+    ok "versione di shim registrata sulla ESP: $ESP_SHIM_VER"
+  else
+    warn "versione di shim sulla ESP ($ESP_SHIM_VER) diversa da quella dell'immagine ($SHIM_VER)"
+  fi
 else
   warn "confronto shim ESP/immagine saltato (shim non trovato in /usr/lib/efi/shim o avvio non composefs)"
 fi
 
+# MOK.cer sulla ESP: scritto da sealed-sync partendo dal PEM dell'immagine, quindi la
+# codifica puo' differire dal tuo file: si confronta l'impronta SHA-256, non i byte
 if file -b "$MOK_CERT" | grep -qi PEM; then
   err "il MOK.cer fornito e' PEM (serve DER)"
 else
   ok "MOK.cer in formato DER"
 fi
-cmp -s "$MOK_CERT" "$ESP_MNT/EFI/BOOT/MOK.cer" \
-  && ok "MOK.cer sulla ESP == quello fornito" || err "MOK.cer sulla ESP diverso da quello fornito"
+fp() { "$RUNTIME" run --rm --security-opt label=disable -v "$1":/c:ro "$TOOLS" \
+         openssl x509 -inform DER -in /c -noout -fingerprint -sha256 2>/dev/null; }
+FP_GIVEN="$(fp "$(readlink -f "$MOK_CERT")")"
+FP_ESP="$(fp "$ESP_MNT/EFI/BOOT/MOK.cer")"
+if [[ -n "$FP_GIVEN" && "$FP_GIVEN" == "$FP_ESP" ]]; then
+  ok "MOK.cer sulla ESP == quello fornito (${FP_GIVEN#*=})"
+else
+  err "MOK.cer sulla ESP diverso da quello fornito"
+fi
+
+# esito dell'ultimo giro di sealed-sync (solo se questo e' il sistema installato)
+if command -v systemctl >/dev/null 2>&1 && systemctl cat sealed-sync.service >/dev/null 2>&1; then
+  if systemctl is-failed --quiet sealed-sync.service; then
+    err "sealed-sync.service e' fallito: journalctl -u sealed-sync -b"
+  else
+    ok "sealed-sync.service non risulta fallito"
+  fi
+fi
 
 log "4. Firme (verificate nel container strumenti)"
 verify_mok() {

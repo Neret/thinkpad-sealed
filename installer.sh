@@ -27,13 +27,8 @@ TOOLS_BASE=quay.io/fedora/fedora:45
 SCRATCH_G=20
 FINISH="${FINISH:-0}"
 TOOLS_BUILT=0
-EFI_SRC=""
 
 cleanup() {
-  if [[ -n "${EFI_SRC:-}" && -d "$EFI_SRC" ]]; then
-    rm -rf "$EFI_SRC"
-  fi
-
   if [[ -n "${DISK:-}" ]]; then
     while findmnt -n -o SOURCE --target /var/tmp 2>/dev/null | grep -q "${DISK}p3"; do
       umount /var/tmp 2>/dev/null || break
@@ -51,7 +46,9 @@ cleanup() {
   fi
 }
 
-trap cleanup EXIT INT TERM
+trap cleanup EXIT
+trap 'exit 130' INT
+trap 'exit 143' TERM
 
 [[ $EUID -eq 0 ]] || die "Esegui lo script come root (sudo)."
 [[ "$(uname -m)" == "x86_64" ]] || die "Supportato solo UEFI x86_64."
@@ -66,7 +63,7 @@ fi
 
 DISK="$(ask 'Disco target (verra cancellato)' '/dev/nvme0n1')"
 IMAGE="$(ask 'Immagine bootc' 'ghcr.io/neret/fedora-bootc-sealed-os:sealed')"
-MOK_CERT="$(ask 'Certificato MOK DER' './MOK.cer')"
+MOK_CERT="$(ask 'Certificato MOK DER' './secureboot/MOK.cer')"
 
 [[ -b "$DISK" ]] || die "Disco non trovato: $DISK"
 [[ -f "$MOK_CERT" ]] || die "Certificato MOK non trovato: $MOK_CERT"
@@ -89,7 +86,7 @@ log "Preparo container strumenti con $RUNTIME"
 BUILD_DIR="$(mktemp -d)"
 cat > "$BUILD_DIR/Containerfile" <<EOF
 FROM ${TOOLS_BASE}
-RUN dnf install -y dosfstools btrfs-progs sbsigntools openssl shim-x64 \
+RUN dnf install -y dosfstools btrfs-progs sbsigntools openssl \
     && dnf clean all
 EOF
 "$RUNTIME" build -q -t "$TOOLS" "$BUILD_DIR" >/dev/null
@@ -101,17 +98,6 @@ tool() {
   "$RUNTIME" run --rm --privileged --security-opt label=disable \
     -v /dev:/dev "$TOOLS" "$@"
 }
-
-EFI_SRC="$(mktemp -d)"
-"$RUNTIME" run --rm --security-opt label=disable -v "$EFI_SRC":/out "$TOOLS" sh -c '
-  set -e
-  cp "$(find /boot /usr -name shimx64.efi 2>/dev/null | head -n1)" /out/shimx64.efi
-  cp "$(find /boot /usr -name mmx64.efi   2>/dev/null | head -n1)" /out/mmx64.efi
-'
-[[ -s "$EFI_SRC/shimx64.efi" && -s "$EFI_SRC/mmx64.efi" ]] || die "shim/mmx64 non estratti dal container"
-SHIM="$EFI_SRC/shimx64.efi"
-MM="$EFI_SRC/mmx64.efi"
-ok "shim e MokManager estratti"
 
 log "Disco target"
 lsblk -o NAME,SIZE,TYPE,FSTYPE,MOUNTPOINTS,MODEL "$DISK"
@@ -237,16 +223,19 @@ touch /mnt/boot/.rwtest 2>/dev/null && rm -f /mnt/boot/.rwtest \
   || { dmesg | tail -n 15; die "ESP ancora in sola lettura (vedi dmesg sopra)"; }
 ok "ESP scrivibile"
 
-log "Copio shim, MokManager e systemd-boot nella ESP"
+log "Popolo la ESP con lo stesso sealed-sync che girera' a ogni boot"
 
 SDB="/mnt/boot/EFI/systemd/systemd-bootx64.efi"
-[[ -f "$SDB" ]] || die "systemd-bootx64.efi non trovato in /mnt/boot/EFI/systemd"
+[[ -f "$SDB" ]] || die "systemd-bootx64.efi non trovato in /mnt/boot/EFI/systemd (bootc non l'ha installato)"
 
-mkdir -p /mnt/boot/EFI/BOOT
-install -m 0644 "$SDB"      /mnt/boot/EFI/BOOT/grubx64.efi
-install -m 0644 "$SHIM"     /mnt/boot/EFI/BOOT/BOOTX64.EFI
-install -m 0644 "$MM"       /mnt/boot/EFI/BOOT/mmx64.efi
-install -m 0644 "$MOK_CERT" /mnt/boot/EFI/BOOT/MOK.cer
+# Una sola fonte di verita': bootloader, shim, MokManager, MOK.cer e versione di shim
+# vengono scritti dagli script dell'immagine (con le stesse verifiche di firma del sistema installato).
+"$RUNTIME" run --rm --security-opt label=disable \
+  -e SEALED_ESP_DIR=/esp -v /mnt/boot:/esp \
+  "$IMAGE" sh -c 'test -x /usr/libexec/sealed-sync || { echo "l immagine non contiene /usr/libexec/sealed-sync" >&2; exit 1; }
+                  exec /usr/libexec/sealed-sync' \
+  || die "sealed-sync dell'immagine fallito: la ESP non e' pronta"
+ok "ESP popolata da sealed-sync"
 
 log "Audit della ESP"
 
@@ -274,14 +263,39 @@ check_file "$ESP_MNT/EFI/BOOT/BOOTX64.EFI"
 check_file "$ESP_MNT/EFI/BOOT/grubx64.efi"
 check_file "$ESP_MNT/EFI/BOOT/mmx64.efi"
 check_file "$ESP_MNT/EFI/BOOT/MOK.cer"
+check_file "$ESP_MNT/EFI/BOOT/shim-version.txt"
 check_file "$ESP_MNT/EFI/systemd/systemd-bootx64.efi"
 
-UKI="$(find "$ESP_MNT/EFI/Linux" -type f -name '*.efi' 2>/dev/null | head -n1 || true)"
-[[ -n "$UKI" ]] || { err "nessuna UKI in $ESP_MNT/EFI/Linux"; FAIL=1; }
+mapfile -t UKIS < <(find "$ESP_MNT/EFI/Linux" -type f -name '*.efi' 2>/dev/null | sort)
+(( ${#UKIS[@]} > 0 )) || { err "nessuna UKI in $ESP_MNT/EFI/Linux"; FAIL=1; }
+UKI="${UKIS[0]:-}"
 
 verify_mok_signature "$ESP_MNT/EFI/systemd/systemd-bootx64.efi"
 verify_mok_signature "$ESP_MNT/EFI/BOOT/grubx64.efi"
-[[ -n "$UKI" ]] && verify_mok_signature "$UKI"
+for u in "${UKIS[@]}"; do
+  verify_mok_signature "$u"
+done
+
+# shim firmato Microsoft, MokManager firmato dal vendor
+out="$("$RUNTIME" run --rm --security-opt label=disable -v "$ESP_MNT":/esp:ro "$TOOLS" \
+      sbverify --list /esp/EFI/BOOT/BOOTX64.EFI 2>&1)" || true
+if grep -qi 'Microsoft' <<<"$out"; then ok "shim firmato Microsoft"; else err "shim: firma Microsoft non trovata"; FAIL=1; fi
+out="$("$RUNTIME" run --rm --security-opt label=disable -v "$ESP_MNT":/esp:ro "$TOOLS" \
+      sbverify --list /esp/EFI/BOOT/mmx64.efi 2>&1)" || true
+if grep -q 'image signature' <<<"$out"; then ok "MokManager firmato (chiave vendor)"; else err "MokManager non firmato"; FAIL=1; fi
+
+# il MOK.cer sulla ESP (scritto da sealed-sync dal certificato dell'immagine) deve essere
+# lo stesso che hai fornito tu: si confronta l'impronta, non i byte
+fp() { "$RUNTIME" run --rm --security-opt label=disable -v "$1":/c:ro "$TOOLS" \
+         openssl x509 -inform DER -in /c -noout -fingerprint -sha256 2>/dev/null; }
+fp_given="$(fp "$(readlink -f "$MOK_CERT")")"
+fp_esp="$(fp "$ESP_MNT/EFI/BOOT/MOK.cer")"
+if [[ -n "$fp_given" && "$fp_given" == "$fp_esp" ]]; then
+  ok "MOK.cer sulla ESP == certificato fornito (${fp_given#*=})"
+else
+  err "MOK.cer sulla ESP diverso dal certificato fornito: l'immagine e il tuo MOK.cer non coincidono"
+  FAIL=1
+fi
 
 if cmp -s "$ESP_MNT/EFI/systemd/systemd-bootx64.efi" "$ESP_MNT/EFI/BOOT/grubx64.efi"; then
   ok "systemd-boot coerente tra EFI/systemd e EFI/BOOT"

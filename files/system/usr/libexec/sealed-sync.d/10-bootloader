@@ -15,6 +15,7 @@ DST2="$MNT/EFI/BOOT/grubx64.efi"
 [[ -s "$CERT" ]] || die "missing MOK certificate: $CERT; refusing to modify the ESP"
 
 need_sbverify
+need_sbattach
 
 sbverify --cert "$CERT" "$SRC" >/dev/null 2>&1 \
     || die "signature of $SRC is not valid for certificate $CERT: refusing to modify the ESP"
@@ -40,5 +41,6 @@ if [[ -n "$V_NEW" && -n "$V_OLD" && "$V_NEW" != "$V_OLD" ]]; then
     fi
 fi
 
-sync_file "$SRC" "$DST1"
-sync_file "$SRC" "$DST2"
+# Re-signed at every build: copy only when the binary changed or the signature on the ESP is no longer valid.
+sync_signed_file "$SRC" "$DST1"
+sync_signed_file "$SRC" "$DST2"
