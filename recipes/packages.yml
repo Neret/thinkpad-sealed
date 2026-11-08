@@ -1,10 +1,9 @@
 # yaml-language-server: $schema=https://schema.blue-build.org/module-v1.json
 ---
 type: dnf
-cleanup: true
 repos:
-  - rpmfusion-free
-  - rpmfusion-free-updates
+  cleanup: true
+  nonfree: rpmfusion
 
 install:
   packages:
@@ -106,7 +105,7 @@ install:
     - usbutils
     - dmidecode
     - smartmontools
-    # - tcpdump
+    - tcpdump
 
     # ---------------------------------------------------------
     # Fonts & Themes
