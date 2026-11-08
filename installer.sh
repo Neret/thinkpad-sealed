@@ -86,7 +86,7 @@ log "Preparo container strumenti con $RUNTIME"
 BUILD_DIR="$(mktemp -d)"
 cat > "$BUILD_DIR/Containerfile" <<EOF
 FROM ${TOOLS_BASE}
-RUN dnf install -y dosfstools btrfs-progs sbsigntools openssl \
+RUN dnf install -y dosfstools e2fsprogs sbsigntools openssl \
     && dnf clean all
 EOF
 "$RUNTIME" build -q -t "$TOOLS" "$BUILD_DIR" >/dev/null
@@ -97,6 +97,14 @@ ok "container strumenti pronto"
 tool() {
   "$RUNTIME" run --rm --privileged --security-opt label=disable \
     -v /dev:/dev "$TOOLS" "$@"
+}
+
+# 0 se il filesystem ext4 sul device ha la feature verity (letta da tune2fs).
+# L'output va in una variabile: con "pipefail" grep -q chiuderebbe la pipe in anticipo.
+root_has_verity() {
+  local info
+  info="$(tool tune2fs -l "$1" 2>/dev/null)" || return 1
+  grep -Eq '^Filesystem features:.*[[:space:]]verity([[:space:]]|$)' <<<"$info"
 }
 
 log "Disco target"
@@ -147,7 +155,7 @@ SCRATCH="${DISK}p3"
 
 log "Formatto ESP e scratch"
 tool mkfs.vfat -F32 "$ESP"
-tool mkfs.btrfs -f -L scratch "$SCRATCH"
+tool mkfs.ext4 -F -q -L scratch "$SCRATCH"
 
 mkdir -p "$SCR"
 mount "$SCRATCH" "$SCR"
@@ -164,8 +172,13 @@ cryptsetup luksFormat --type luks2 --pbkdf argon2id --batch-mode --key-file "$KE
 log "Apro il container LUKS"
 cryptsetup open --key-file "$KEY" "$ROOT" cryptroot
 
-log "Formatto btrfs dentro LUKS"
-tool mkfs.btrfs -f -L sealed-root /dev/mapper/cryptroot
+log "Formatto ext4 (con fs-verity) dentro LUKS"
+# fs-verity e' obbligatorio per l'immagine sigillata (verity=require): su ext4 va attivato
+# al mkfs. Blocchi da 4 KiB = dimensione di pagina, requisito di fs-verity.
+tool mkfs.ext4 -F -q -b 4096 -O verity -L sealed-root /dev/mapper/cryptroot
+root_has_verity /dev/mapper/cryptroot \
+  || die "ext4 creato senza la feature verity: l'immagine sigillata non potrebbe avviarsi"
+ok "ext4 con feature verity"
 
 log "Monto root e ESP"
 mount /dev/mapper/cryptroot /mnt
@@ -177,7 +190,7 @@ ROOT_UUID="$(blkid -s UUID -o value /dev/mapper/cryptroot)"
 ESP_UUID="$(blkid -s UUID -o value "$ESP")"
 
 echo "LUKS UUID:  $LUKS_UUID"
-echo "btrfs UUID: $ROOT_UUID"
+echo "root UUID:  $ROOT_UUID"
 echo "ESP UUID:   $ESP_UUID"
 
 log "Installo immagine sealed: $IMAGE"
@@ -241,6 +254,15 @@ log "Audit della ESP"
 
 ESP_MNT=/mnt/boot
 FAIL=0
+
+# La root deve essere ext4 con fs-verity (vale anche per FINISH=1, dove il mkfs e' gia' stato fatto)
+ROOT_FSTYPE="$(blkid -s TYPE -o value /dev/mapper/cryptroot 2>/dev/null || true)"
+if [[ "$ROOT_FSTYPE" == "ext4" ]] && root_has_verity /dev/mapper/cryptroot; then
+  ok "root ext4 con fs-verity"
+else
+  err "root non ext4 o senza fs-verity (tipo: ${ROOT_FSTYPE:-sconosciuto}): l'immagine sigillata non si avvierebbe"
+  FAIL=1
+fi
 
 check_file() {
   [[ -f "$1" ]] && ok "presente: $1" || { err "manca: $1"; FAIL=1; }
@@ -316,7 +338,7 @@ done < <(find "$ESP_MNT" -type f -print0)
 log "Riepilogo"
 echo "Runtime:    $RUNTIME"
 echo "ESP UUID:   $ESP_UUID"
-echo "btrfs UUID: $ROOT_UUID"
+echo "root UUID:  $ROOT_UUID"
 echo "LUKS UUID:  $LUKS_UUID"
 echo "UKI:        ${UKI:-non trovata}"
 
@@ -331,14 +353,22 @@ umount /mnt
 cryptsetup close cryptroot
 
 log "Restituisco lo spazio di scratch alla root"
+
+# Ridimensionamento a freddo (filesystem non montato): e2fsck forzato, poi resize2fs.
+# e2fsck esce con 0 (pulito) o 1 (corretto qualcosa); da 2 in su e' un errore.
+grow_root() {
+  local rc=0
+  tool e2fsck -f -p /dev/mapper/cryptroot || rc=$?
+  (( rc <= 1 )) || return 1
+  tool resize2fs /dev/mapper/cryptroot
+}
+
 if sfdisk --delete "$DISK" 3 \
    && echo ',+' | sfdisk --no-reread -N 2 "$DISK" \
    && { blockdev --rereadpt "$DISK" || true; } \
    && udevadm settle \
    && cryptsetup open --key-file "$KEY" "$ROOT" cryptroot \
-   && mount /dev/mapper/cryptroot /mnt \
-   && "$RUNTIME" run --rm --privileged --security-opt label=disable \
-        -v /dev:/dev -v /mnt:/mnt "$TOOLS" btrfs filesystem resize max /mnt; then
+   && grow_root; then
   ok "root estesa a tutto il disco"
 else
   warn "ridimensionamento non riuscito: il sistema funziona comunque, la root resta di ${ROOT_G} GiB"

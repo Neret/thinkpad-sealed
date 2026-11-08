@@ -74,7 +74,7 @@ if ! "$RUNTIME" image inspect "$TOOLS" >/dev/null 2>&1; then
   BUILD_DIR="$(mktemp -d)"
   cat > "$BUILD_DIR/Containerfile" <<EOF
 FROM ${TOOLS_BASE}
-RUN dnf install -y dosfstools btrfs-progs sbsigntools openssl \
+RUN dnf install -y dosfstools e2fsprogs sbsigntools openssl \
     && dnf clean all
 EOF
   "$RUNTIME" build -q -t "$TOOLS" "$BUILD_DIR" >/dev/null
@@ -223,6 +223,30 @@ else
 fi
 
 df -h "$ROOT_MNT" "$ESP_MNT" | sed 's/^/    /'
+
+# Filesystem della root: ext4 con la feature verity (richiesta dall'immagine sigillata).
+ROOT_FSTYPE="$(findmnt -rn -o FSTYPE --target "$ROOT_MNT" 2>/dev/null || true)"
+ROOT_SRC="$(findmnt -rn -o SOURCE --target "$ROOT_MNT" 2>/dev/null || true)"
+ROOT_SRC="${ROOT_SRC%%\[*}"   # i bind mount mostrano /dev/mapper/x[/sottopercorso]
+if [[ "$ROOT_FSTYPE" == "ext4" ]]; then
+  ok "root ext4"
+  FEATURES=""
+  if command -v tune2fs >/dev/null 2>&1; then
+    FEATURES="$(tune2fs -l "$ROOT_SRC" 2>/dev/null | grep -E '^Filesystem features:' || true)"
+  else
+    FEATURES="$("$RUNTIME" run --rm --privileged --security-opt label=disable -v /dev:/dev "$TOOLS" \
+                  tune2fs -l "$ROOT_SRC" 2>/dev/null | grep -E '^Filesystem features:' || true)"
+  fi
+  if [[ -z "$FEATURES" ]]; then
+    warn "feature della root non leggibili (tune2fs non disponibile): verifica a mano con 'sudo tune2fs -l $ROOT_SRC'"
+  elif grep -Eq '[[:space:]]verity([[:space:]]|$)' <<<"$FEATURES"; then
+    ok "root ext4 con fs-verity"
+  else
+    err "root ext4 SENZA fs-verity: l'immagine sigillata (verity=require) non puo' funzionare"
+  fi
+else
+  err "root non ext4 (tipo: ${ROOT_FSTYPE:-sconosciuto})"
+fi
 
 log "3. File nella ESP"
 for f in EFI/BOOT/BOOTX64.EFI EFI/BOOT/grubx64.efi EFI/BOOT/mmx64.efi EFI/BOOT/MOK.cer \

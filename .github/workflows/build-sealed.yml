@@ -24,7 +24,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 120
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v4
 
       - name: Free disk space
         run: sudo rm -rf /usr/share/dotnet /opt/ghc /usr/local/lib/android /opt/hostedtoolcache
@@ -138,7 +138,7 @@ jobs:
             -v /mnt/rehearsal:/data \
             "${IMAGE}:${TAG}" \
             bootc install to-disk --via-loopback --composefs-backend \
-            --bootloader systemd --filesystem btrfs /data/disk.raw
+            --bootloader systemd --filesystem ext4 /data/disk.raw
 
       - name: Push sealed image (tag univoco e tag mobile "sealed")
         run: |
