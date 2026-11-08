@@ -28,9 +28,17 @@ SCRATCH_G=20
 FINISH="${FINISH:-0}"
 TOOLS_BUILT=0
 
+# Nome della partizione N del disco: nvme0n1 -> nvme0n1p1, mmcblk0 -> mmcblk0p1, sda -> sda1
+part() {
+  case "$DISK" in
+    *[0-9]) printf '%sp%s' "$DISK" "$1" ;;
+    *)      printf '%s%s' "$DISK" "$1" ;;
+  esac
+}
+
 cleanup() {
   if [[ -n "${DISK:-}" ]]; then
-    while findmnt -n -o SOURCE --target /var/tmp 2>/dev/null | grep -q "${DISK}p3"; do
+    while findmnt -n -o SOURCE --target /var/tmp 2>/dev/null | grep -q "$(part 3)"; do
       umount /var/tmp 2>/dev/null || break
     done
   fi
@@ -66,6 +74,8 @@ IMAGE="$(ask 'Immagine bootc' 'ghcr.io/neret/fedora-bootc-sealed-os:sealed')"
 MOK_CERT="$(ask 'Certificato MOK DER' './secureboot/MOK.cer')"
 
 [[ -b "$DISK" ]] || die "Disco non trovato: $DISK"
+[[ "$(lsblk -ndo TYPE "$DISK" 2>/dev/null)" == "disk" ]] \
+  || die "$DISK non e' un disco intero (e' una partizione o un altro tipo di device)"
 [[ -f "$MOK_CERT" ]] || die "Certificato MOK non trovato: $MOK_CERT"
 
 for cmd in sfdisk wipefs blkid lsblk mount findmnt cryptsetup file udevadm blockdev; do
@@ -99,6 +109,65 @@ tool() {
     -v /dev:/dev "$TOOLS" "$@"
 }
 
+# Rende il disco libero: swap spento, mount smontati (i piu' profondi per primi),
+# mapping LUKS/LVM chiusi (i figli per primi). Si rifiuta se il sistema in uso sta sul disco.
+# A fine corsa verifica che non resti nulla di attivo: meglio fermarsi qui che far fallire wipefs/sfdisk.
+release_disk() {
+  local disk="$1" dev type t
+  local -a devs targets
+
+  mapfile -t devs < <(lsblk -nrpo NAME "$disk")
+
+  # 1. il sistema in uso (o la USB live) non deve stare sul disco che stiamo per cancellare
+  for dev in "${devs[@]}"; do
+    while IFS= read -r t; do
+      case "$t" in
+        /|/usr|/sysroot|/run/initramfs/live|/run/rootfsbase|/run/live/medium)
+          die "$dev e' montato su $t: il disco target contiene il sistema in uso. Avvia da una USB live ed esegui l'installer da li." ;;
+      esac
+    done < <(findmnt -rn -o TARGET -S "$dev" 2>/dev/null)
+  done
+
+  # 2. swap
+  for dev in "${devs[@]}"; do
+    if swapon --noheadings --show=NAME 2>/dev/null | grep -qxF "$dev"; then
+      swapoff "$dev" || die "swapoff fallito su $dev"
+    fi
+  done
+
+  # 3. mount: percorsi piu' lunghi (piu' profondi) per primi
+  mapfile -t targets < <(
+    for dev in "${devs[@]}"; do findmnt -rn -o TARGET -S "$dev" 2>/dev/null; done \
+      | sort -u | awk '{ print length($0) "\t" $0 }' | sort -rn | cut -f2-
+  )
+  for t in "${targets[@]}"; do
+    [[ -n "$t" ]] || continue
+    umount "$t" 2>/dev/null || die "impossibile smontare $t (qualcosa lo sta usando: chiudi shell e programmi aperti li')"
+  done
+
+  # 4. mapping LUKS/LVM: i figli vengono dopo i genitori in lsblk, quindi si legge al contrario
+  while read -r dev type; do
+    case "$type" in
+      disk|part) ;;
+      crypt) cryptsetup close "$dev" || die "cryptsetup close fallito su $dev" ;;
+      *)
+        command -v dmsetup >/dev/null 2>&1 || die "$dev ($type) attivo ma dmsetup non e' installato"
+        dmsetup remove "$dev" || die "dmsetup remove fallito su $dev"
+        ;;
+    esac
+  done < <(lsblk -nrpo NAME,TYPE "$disk" | tac)
+
+  udevadm settle
+
+  # 5. controllo finale
+  if lsblk -nr -o TYPE "$disk" | grep -qvE '^(disk|part)$'; then
+    die "su $disk restano mapping attivi: chiudili a mano e rilancia"
+  fi
+  if [[ -n "$(lsblk -nr -o MOUNTPOINTS "$disk" | tr -d '[:space:]')" ]]; then
+    die "su $disk restano mount o swap attivi: smontali a mano e rilancia"
+  fi
+}
+
 # 0 se il filesystem ext4 sul device ha la feature verity (letta da tune2fs).
 # L'output va in una variabile: con "pipefail" grep -q chiuderebbe la pipe in anticipo.
 root_has_verity() {
@@ -126,17 +195,21 @@ unset P1 P2
 
 if [[ "$FINISH" != 1 ]]; then
 
-log "Pulizia di mount, LUKS e firme residue"
+log "Libero il disco: swap, mount, LUKS/LVM aperti"
 umount -R /mnt 2>/dev/null || true
 
-while findmnt -n -o SOURCE --target /var/tmp 2>/dev/null | grep -q "${DISK}p3"; do
+while findmnt -n -o SOURCE --target /var/tmp 2>/dev/null | grep -q "$(part 3)"; do
   umount /var/tmp 2>/dev/null || break
 done
 
-umount "$SCR" 2>/dev/null || true
-cryptsetup close cryptroot 2>/dev/null || true
-wipefs -af "${DISK}"p* 2>/dev/null || true
-wipefs -af "$DISK"
+release_disk "$DISK"
+ok "nessun mount, swap o mapping attivo su $DISK"
+
+log "Cancello le firme (LUKS, filesystem, tabella delle partizioni)"
+while read -r p; do
+  wipefs -af "$p" >/dev/null || die "wipefs fallito su $p"
+done < <(lsblk -nrpo NAME,TYPE "$DISK" | awk '$2=="part"{print $1}')
+wipefs -af "$DISK" >/dev/null || die "wipefs fallito su $DISK"
 
 log "Creo layout: ESP 2 GiB + root LUKS2 (${ROOT_G} GiB) + scratch ${SCRATCH_G} GiB"
 sfdisk "$DISK" <<EOT
@@ -148,9 +221,9 @@ EOT
 udevadm settle
 sleep 2
 
-ESP="${DISK}p1"
-ROOT="${DISK}p2"
-SCRATCH="${DISK}p3"
+ESP="$(part 1)"
+ROOT="$(part 2)"
+SCRATCH="$(part 3)"
 [[ -b "$ESP" && -b "$ROOT" && -b "$SCRATCH" ]] || die "Partizioni non create"
 
 log "Formatto ESP e scratch"
@@ -214,9 +287,9 @@ fi
 sync
 
 else
-  ESP="${DISK}p1"
-  ROOT="${DISK}p2"
-  SCRATCH="${DISK}p3"
+  ESP="$(part 1)"
+  ROOT="$(part 2)"
+  SCRATCH="$(part 3)"
 
   [[ -b /dev/mapper/cryptroot ]] && mountpoint -q /mnt \
     || die "FINISH=1: LUKS aperto o /mnt non montato. Rilancia senza FINISH."
