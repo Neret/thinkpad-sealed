@@ -1,10 +1,16 @@
 # yaml-language-server: $schema=https://schema.blue-build.org/module-v1.json
 ---
 type: dnf
+cleanup: true
 repos:
-  cleanup: true
+  - rpmfusion-free
+  - rpmfusion-free-updates
+
 install:
   packages:
+    # ---------------------------------------------------------
+    # GNOME Desktop — componenti host
+    # ---------------------------------------------------------
     - gdm
     - gnome-shell
     - gnome-session-wayland-session
@@ -17,13 +23,27 @@ install:
     - xdg-desktop-portal-gnome
     - xdg-desktop-portal-gtk
     - xdg-user-dirs-gtk
-    - gnome-initial-setup
-    - NetworkManager
+    # - gnome-initial-setup
+    # - gnome-tweaks
+    # - gnome-shell-extension-gsconnect
+    # - gnome-extensions-app
+
+    # ---------------------------------------------------------
+    # Networking
+    # ---------------------------------------------------------
     - NetworkManager-wifi
     - NetworkManager-bluetooth
     - wpa_supplicant
-    - systemd-resolved
     - firewalld
+
+    # ---------------------------------------------------------
+    # Security / Storage
+    # ---------------------------------------------------------
+    - sbsigntools
+
+    # ---------------------------------------------------------
+    # Audio & Power Management
+    # ---------------------------------------------------------
     - pipewire
     - pipewire-pulseaudio
     - wireplumber
@@ -31,53 +51,122 @@ install:
     - bluez
     - upower
     - power-profiles-daemon
-    - fwupd
-    - linux-firmware
-    - amd-gpu-firmware
-    - amd-ucode-firmware
-    - iwlwifi-mvm-firmware
-    - realtek-firmware
-    - mesa-dri-drivers
-    - mesa-vulkan-drivers
     - fprintd
     - fprintd-pam
-    - cryptsetup
+
+    # ---------------------------------------------------------
+    # Firmware & Drivers
+    # ---------------------------------------------------------
+    - iwlwifi-mvm-firmware
+
+    # ---------------------------------------------------------
+    # Graphics / VA-API
+    # ---------------------------------------------------------
+    - mesa-dri-drivers
+    - mesa-vulkan-drivers
+    - mesa-va-drivers-freeworld
+
+    # ---------------------------------------------------------
+    # Boot
+    # ---------------------------------------------------------
     - systemd-boot-unsigned
-    - tpm2-tss
-    - pciutils
-    - usbutils
-    - dmidecode
-    - plymouth
     - zram-generator-defaults
+
+    # ---------------------------------------------------------
+    # Flatpak
+    # ---------------------------------------------------------
+    - flatpak
+
+    # ---------------------------------------------------------
+    # Localization
+    # ---------------------------------------------------------
     - glibc-langpack-it
     - glibc-langpack-en
-    - flatpak
-    - podman
-    - selinux-policy-targeted
-    - gnome-disk-utility
-#    - parted
-#    - gnome-shell-extension-gsconnect
-#    - wget
-    - jq
-    - file
-    - procps-ng
-    - git-core
-    - curl
-    - unzip
+
+    # ---------------------------------------------------------
+    # Shell & CLI — host
+    # ---------------------------------------------------------
+    - zsh
+    - zsh-autosuggestions
+    - zsh-syntax-highlighting
+    - zoxide
     - bat
     - eza
     - fd-find
     - fzf
     - ripgrep
-    - smartmontools
     - micro
-    - tcpdump
+    - git-core
+    - which
+
+    # ---------------------------------------------------------
+    # Diagnostica hardware — host
+    # ---------------------------------------------------------
+    - pciutils
+    - usbutils
+    - dmidecode
+    - smartmontools
+    # - tcpdump
+
+    # ---------------------------------------------------------
+    # Fonts & Themes
+    # ---------------------------------------------------------
     - papirus-icon-theme
     - rsms-inter-fonts
     - fontconfig
-    - zoxide
-    - sbsigntools
-    - which
-    - zsh
-    - zsh-autosuggestions
-    - zsh-syntax-highlighting
+
+    # ---------------------------------------------------------
+    # Virtualization — futura
+    # ---------------------------------------------------------
+    # - qemu-kvm
+    # - libvirt
+    # - virt-install
+    # - virt-manager
+    # - virt-viewer
+    # - guestfs-tools
+    # - libguestfs-tools
+    # - bridge-utils
+    # - dnsmasq
+    # - edk2-ovmf
+    # - swtpm
+    # - swtpm-tools
+
+    # ---------------------------------------------------------
+    # Containers / Dev — futuri
+    # ---------------------------------------------------------
+    # - distrobox
+    # - buildah
+    # - crane
+    # - yq
+    # - docker-compose
+    # - podman-compose
+
+    # ---------------------------------------------------------
+    # Multimedia / Codecs — futuri, solo per app RPM native
+    # ---------------------------------------------------------
+    # - ffmpeg
+    # - libavcodec-freeworld
+    # - gstreamer1-plugins-bad-freeworld
+    # - gstreamer1-plugins-ugly
+    # - gstreamer1-plugin-libav
+    # - gstreamer1-vaapi
+
+    # ---------------------------------------------------------
+    # Networking tools — futuri
+    # ---------------------------------------------------------
+    # - NetworkManager-cloud-setup
+    # - nmstate
+    # - nmap
+    # - iperf3
+    # - mtr
+    # - traceroute
+    # - bind-utils
+
+    # ---------------------------------------------------------
+    # Backup / Sync — futuri
+    # ---------------------------------------------------------
+    # - borgbackup
+    # - restic
+    # - rclone
+    # - syncthing
+    # - timeshift
