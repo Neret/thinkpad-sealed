@@ -90,8 +90,8 @@ jobs:
             -t "${IMAGE}:${TAG}" \
             .
 
-      # Controllo rapido (secondi): bootc accetta il digest se combacia con una delle
-      # combinazioni v1/v2. Se nessuna combacia, la rehearsal fallirebbe comunque.
+      # Controllo rapido (secondi): la UKI porta sia il digest v1 sia il v2 nella command line,
+      # quindi devono coincidere ENTRAMBI con quelli dell'immagine finale.
       - name: Check final image digest matches the one in the UKI
         run: |
           ok=0
@@ -104,9 +104,13 @@ jobs:
             var="COMPOSEFS_${v^^}"
             echo "${v}: finale=${d}"
             echo "${v}: uki   =${!var}"
-            [ "$d" = "${!var}" ] && ok=1
+            if [ "$d" = "${!var}" ]; then
+              ok=$((ok + 1))
+            else
+              echo "ERRORE: il digest ${v} dell'immagine finale non coincide con quello nella UKI"
+            fi
           done
-          [ "$ok" = 1 ] || { echo "Nessun digest dell'immagine finale coincide con quello nella UKI"; exit 1; }
+          [ "$ok" = 2 ] || { echo "Digest v1/v2 non coincidenti con la UKI: immagine non pubblicata"; exit 1; }
 
       - name: Verify signatures
         run: |
