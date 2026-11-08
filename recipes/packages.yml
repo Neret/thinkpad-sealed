@@ -22,7 +22,7 @@ install:
     - xdg-desktop-portal-gnome
     - xdg-desktop-portal-gtk
     - xdg-user-dirs-gtk
-    - gnome-initial-setup
+    # - gnome-initial-setup
     # - gnome-tweaks
     # - gnome-shell-extension-gsconnect
     # - gnome-extensions-app
@@ -133,7 +133,7 @@ install:
     # ---------------------------------------------------------
     # Containers / Dev — futuri
     # ---------------------------------------------------------
-    # - distrobox
+    - distrobox
     # - buildah
     # - crane
     # - yq

@@ -36,14 +36,20 @@ part() {
   esac
 }
 
-cleanup() {
-  if [[ -n "${DISK:-}" ]]; then
-    while findmnt -n -o SOURCE --target /var/tmp 2>/dev/null | grep -q "$(part 3)"; do
-      umount /var/tmp 2>/dev/null || break
+# Smonta tutto cio' che poggia sullo scratch: storage di podman, /var/tmp, lo scratch stesso.
+release_scratch() {
+  local m
+  [[ -n "${DISK:-}" ]] || return 0
+  for m in /var/lib/containers /var/tmp; do
+    while findmnt -n -M "$m" -o SOURCE 2>/dev/null | grep -q "$(part 3)"; do
+      umount "$m" 2>/dev/null || break
     done
-  fi
-
+  done
   umount "$SCR" 2>/dev/null || true
+}
+
+cleanup() {
+  release_scratch
   umount /mnt/boot 2>/dev/null || true
   umount /mnt 2>/dev/null || true
   cryptsetup close cryptroot 2>/dev/null || true
@@ -93,14 +99,21 @@ ROOT_G=$(( DISK_G - 2 - SCRATCH_G - 1 ))
 (( ROOT_G >= 20 )) || die "Disco troppo piccolo ($DISK_G GiB) per ESP + root + scratch"
 
 log "Preparo container strumenti con $RUNTIME"
-BUILD_DIR="$(mktemp -d)"
+# Nella live /var/tmp sta su un overlay: buildah ci monta sopra un altro overlay e fallisce
+# ("mount overlay ... invalid argument"). Solo per la build, i file temporanei vanno su /run (tmpfs).
+# Un TMPDIR impostato da fuori viene ignorato: si usa sempre questa cartella, creata qui.
+BUILD_TMP=/run/sealed-buildtmp
+rm -rf "$BUILD_TMP"
+mkdir -p "$BUILD_TMP"
+BUILD_DIR="$(mktemp -d -p "$BUILD_TMP")"
 cat > "$BUILD_DIR/Containerfile" <<EOF
 FROM ${TOOLS_BASE}
 RUN dnf install -y dosfstools e2fsprogs sbsigntools openssl \
     && dnf clean all
 EOF
-"$RUNTIME" build -q -t "$TOOLS" "$BUILD_DIR" >/dev/null
-rm -rf "$BUILD_DIR"
+TMPDIR="$BUILD_TMP" "$RUNTIME" build -q -t "$TOOLS" "$BUILD_DIR" >/dev/null \
+  || { rm -rf "$BUILD_TMP"; die "build del container strumenti fallita (vedi l'errore sopra)"; }
+rm -rf "$BUILD_TMP"
 TOOLS_BUILT=1
 ok "container strumenti pronto"
 
@@ -168,6 +181,37 @@ release_disk() {
   fi
 }
 
+# Monta lo scratch (partizione sull'NVMe) e ci sposta lo spazio che serve al download dell'immagine:
+# nella live la root e' un overlay in RAM, troppo piccolo ("no space left on device").
+#  - /var/tmp           -> bind sullo scratch
+#  - /var/lib/containers (storage di podman) -> bind su una cartella dello scratch, con copia di
+#    quanto c'e' gia' (l'immagine strumenti), cosi' i container gia' creati restano disponibili.
+mount_scratch() {
+  [[ -b "$SCRATCH" ]] || die "partizione scratch $SCRATCH non trovata"
+  mkdir -p "$SCR"
+  mountpoint -q "$SCR" || mount "$SCRATCH" "$SCR" || die "mount dello scratch fallito"
+  chmod 1777 "$SCR"
+  chcon -t tmp_t "$SCR" 2>/dev/null || true
+
+  if ! findmnt -n -M /var/tmp -o SOURCE 2>/dev/null | grep -q "$SCRATCH"; then
+    mount --bind "$SCR" /var/tmp || die "bind di /var/tmp sullo scratch fallito"
+  fi
+
+  if [[ "$RUNTIME" == podman ]]; then
+    mkdir -p /var/lib/containers "$SCR/containers"
+    if ! findmnt -n -M /var/lib/containers -o SOURCE 2>/dev/null | grep -q "$SCRATCH"; then
+      chcon --reference=/var/lib/containers "$SCR/containers" 2>/dev/null || true
+      cp -a /var/lib/containers/. "$SCR/containers/" || die "copia dello storage di podman sullo scratch fallita"
+      mount --bind "$SCR/containers" /var/lib/containers || die "bind dello storage di podman sullo scratch fallito"
+    fi
+  else
+    warn "runtime $RUNTIME: lo storage delle immagini non viene spostato sullo scratch (puo' mancare spazio nella live)"
+  fi
+
+  log "Spazio libero (ora sull'NVMe)"
+  df -h /var/tmp /var/lib/containers 2>/dev/null || df -h /var/tmp
+}
+
 # 0 se il filesystem ext4 sul device ha la feature verity (letta da tune2fs).
 # L'output va in una variabile: con "pipefail" grep -q chiuderebbe la pipe in anticipo.
 root_has_verity() {
@@ -198,9 +242,7 @@ if [[ "$FINISH" != 1 ]]; then
 log "Libero il disco: swap, mount, LUKS/LVM aperti"
 umount -R /mnt 2>/dev/null || true
 
-while findmnt -n -o SOURCE --target /var/tmp 2>/dev/null | grep -q "$(part 3)"; do
-  umount /var/tmp 2>/dev/null || break
-done
+release_scratch
 
 release_disk "$DISK"
 ok "nessun mount, swap o mapping attivo su $DISK"
@@ -230,14 +272,7 @@ log "Formatto ESP e scratch"
 tool mkfs.vfat -F32 "$ESP"
 tool mkfs.ext4 -F -q -L scratch "$SCRATCH"
 
-mkdir -p "$SCR"
-mount "$SCRATCH" "$SCR"
-chmod 1777 "$SCR"
-chcon -t tmp_t "$SCR" 2>/dev/null || true
-
-mount --bind "$SCR" /var/tmp
-log "Spazio libero su /var/tmp (ora sull'NVMe)"
-df -h /var/tmp
+mount_scratch
 
 log "Creo LUKS2"
 cryptsetup luksFormat --type luks2 --pbkdf argon2id --batch-mode --key-file "$KEY" "$ROOT"
@@ -295,6 +330,13 @@ else
     || die "FINISH=1: LUKS aperto o /mnt non montato. Rilancia senza FINISH."
 
   mountpoint -q /mnt/boot || mount "$ESP" /mnt/boot
+
+  # Lo scratch serve anche qui: l'audit esegue l'immagine, e senza spazio il pull fallirebbe
+  if [[ -b "$SCRATCH" ]]; then
+    mount_scratch
+  else
+    warn "scratch non presente: l'immagine verra' scaricata nello storage della live (puo' mancare spazio)"
+  fi
 
   LUKS_UUID="$(cryptsetup luksUUID "$ROOT")"
   ROOT_UUID="$(blkid -s UUID -o value /dev/mapper/cryptroot)"
@@ -421,6 +463,9 @@ fi
 ok "TUTTO OK"
 
 log "Smonto e chiudo LUKS"
+# Lo scratch viene cancellato piu' sotto: prima va liberato (storage di podman incluso).
+# Da qui il container strumenti torna a vivere nello storage originale della live, dove era gia'.
+release_scratch
 umount /mnt/boot
 umount /mnt
 cryptsetup close cryptroot
