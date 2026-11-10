@@ -1,7 +1,4 @@
 [org.gnome.desktop.interface]
-icon-theme='Papirus-Dark'
-cursor-theme='Bibata-Modern-Ice'
-cursor-size=28
-font-name='Inter 12'
-document-font-name='Inter 14'
-monospace-font-name='FiraCode Nerd Font Mono 13'
+font-name='Adwaita Sans 12'
+document-font-name='Adwaita Sans 14'
+monospace-font-name='Adwaita Mono 14'

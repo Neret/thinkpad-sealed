@@ -110,9 +110,9 @@ install:
     # ---------------------------------------------------------
     # Fonts & Themes
     # ---------------------------------------------------------
-    #  - papirus-icon-theme
+    # - papirus-icon-theme
     # - rsms-inter-fonts
-    - fontconfig
+    # - fontconfig
 
     # ---------------------------------------------------------
     # Virtualization — futura
