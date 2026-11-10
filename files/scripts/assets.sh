@@ -20,11 +20,18 @@ NF_VER="v3.5.1"
 NF_SHA="68e3bd6164864b8b514605bc34e3a87ac401c8c48682fcce6478c70263340207"
 
 # ── Directory di destinazione ────────────────────────────────
+ICONS_DIR="/var/home/user/.local/share/icons"
+FONTS_DIR="/var/home/user/.local/share/fonts"
+FONTS_INTER_DIR="$FONTS_DIR/inter"
+FONTS_FIRACODE_DIR="$FONTS_DIR/firacode-nerd"
+BIN_DIR="/var/home/user/.local/bin"
+
 mkdir -p \
-  /usr/local/bin \
-  /usr/share/icons \
-  /usr/share/fonts/firacode-nerd \
-  /usr/share/fonts/inter
+  "$BIN_DIR" \
+  "$ICONS_DIR" \
+  "$FONTS_DIR" \
+  "$FONTS_INTER_DIR" \
+  "$FONTS_FIRACODE_DIR"
 
 # ── Starship ─────────────────────────────────────────────────
 base="https://github.com/starship/starship/releases/download/v${STARSHIP_VER}"
@@ -42,7 +49,7 @@ echo "$(tr -d ' \n' < "$tmp/starship.sha256")  $tmp/starship.tar.gz" \
 
 tar -xzf "$tmp/starship.tar.gz" -C "$tmp"
 
-install -m 0755 "$tmp/starship" /usr/local/bin/starship
+install -m 0755 "$tmp/starship" "$BIN_DIR/starship"
 
 # ── Bibata Modern Ice ────────────────────────────────────────
 curl -fsSL \
@@ -51,7 +58,7 @@ curl -fsSL \
 
 echo "$BIBATA_SHA  $tmp/bibata.tar.xz" | sha256sum -c -
 
-tar -xJf "$tmp/bibata.tar.xz" -C /usr/share/icons
+tar -xJf "$tmp/bibata.tar.xz" -C "$ICONS_DIR"
 
 # ── Papirus Icon Theme ───────────────────────────────────────
 # La release non pubblica asset: usiamo l'archivio del tag GitHub,
@@ -75,8 +82,7 @@ if [[ -z "$papirus_dir" ]]; then
   exit 1
 fi
 
-rm -rf /usr/share/icons/Papirus
-cp -a "$papirus_dir" /usr/share/icons/Papirus
+cp -a "$papirus_dir" "$ICONS_DIR/"
 
 # ── Inter font ───────────────────────────────────────────────
 INTER_URL="https://github.com/rsms/inter/releases/download/${INTER_VER}/Inter-${INTER_VER#v}.zip"
@@ -92,7 +98,7 @@ find "$tmp/inter-extract" -type f \( \
   -iname '*.ttf' -o \
   -iname '*.otf' -o \
   -iname '*.woff2' \
-\) -exec cp -a {} /usr/share/fonts/inter/ \;
+\) -exec cp -a {} "$FONTS_INTER_DIR" \;
 
 # ── FiraCode Nerd Font ───────────────────────────────────────
 curl -fsSL \
@@ -101,18 +107,14 @@ curl -fsSL \
 
 echo "$NF_SHA  $tmp/firacode.tar.xz" | sha256sum -c -
 
-tar -xJf "$tmp/firacode.tar.xz" -C /usr/share/fonts/firacode-nerd
+tar -xJf "$tmp/firacode.tar.xz" -C "$FONTS_FIRACODE_DIR"
 
 # ── Cache font ───────────────────────────────────────────────
 if command -v fc-cache >/dev/null; then
-  fc-cache -f /usr/share/fonts
+  fc-cache -f "$FONTS_DIR"
 fi
 
-# ── Target grafico predefinito ───────────────────────────────
-ln -sf /usr/lib/systemd/system/graphical.target \
-  /etc/systemd/system/default.target
-
 echo "Installazione asset completata."
-echo "Starship: /usr/local/bin/starship"
-echo "Temi cursore/icona: /usr/share/icons"
-echo "Font: /usr/share/fonts"
+echo "Starship: $BIN_DIR/starship"
+echo "Temi cursore/icone: $ICONS_DIR"
+echo "Font: $FONTS_DIR"
