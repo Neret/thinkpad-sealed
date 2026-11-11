@@ -22,6 +22,7 @@ install:
     - xdg-desktop-portal-gnome
     - xdg-desktop-portal-gtk
     - xdg-user-dirs-gtk
+    - xdg-utils
     # - gnome-initial-setup
     # - gnome-tweaks
     # - gnome-shell-extension-gsconnect
