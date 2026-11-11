@@ -8,19 +8,8 @@ trap 'rm -rf "$tmp"' EXIT
 
 base="https://github.com/starship/starship/releases/download/v${STARSHIP_VER}"
 
-curl -fsSL \
-  "$base/starship-x86_64-unknown-linux-musl.tar.gz" \
-  -o "$tmp/starship.tar.gz"
+curl -fsSL "$base/starship-x86_64-unknown-linux-musl.tar.gz" -o "$tmp/starship.tar.gz"
+curl -fsSL "$base/starship-x86_64-unknown-linux-musl.tar.gz.sha256" -o "$tmp/starship.sha256"
 
-curl -fsSL \
-  "$base/starship-x86_64-unknown-linux-musl.tar.gz.sha256" \
-  -o "$tmp/starship.sha256"
+echo "$(tr -d ' \n' < "$tmp/starship.sha256")  $tmp/starship.tar.gz" | sha256sum -c -
 
-echo "$(tr -d ' \n' < "$tmp/starship.sha256")  $tmp/starship.tar.gz" \
-  | sha256sum -c -
-
-tar -xzf "$tmp/starship.tar.gz" -C /usr/local/bin
-
-echo "Installazione Starship completata."
-command -v starship
-starship --version
