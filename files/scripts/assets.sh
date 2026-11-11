@@ -30,11 +30,6 @@ if [[ ! -f "$tmp/starship" ]]; then
 fi
 
 printf 'Installing Starship to %s\n' "$STARSHIP_INSTALL_DIR"
+install -m 0755 "$tmp/starship" "$STARSHIP_INSTALL_DIR/starship"
 
-if (( EUID == 0 )); then
-    install -m 0755 "$tmp/starship" "$STARSHIP_INSTALL_DIR/starship"
-else
-    sudo install -m 0755 "$tmp/starship" "$STARSHIP_INSTALL_DIR/starship"
-fi
-
-printf 'Installed Starship %s\n' "$("$STARSHIP_INSTALL_DIR/starship" --version)"
+printf 'Installed %s\n' "$("$STARSHIP_INSTALL_DIR/starship" --version)"
