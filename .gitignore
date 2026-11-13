@@ -6,3 +6,4 @@ secureboot/cosign.key
 # Backup
 *.bak
 *.key
+.aider*
