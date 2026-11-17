@@ -118,6 +118,8 @@ install:
     - which
     - curl
     - tar
+    - ncurses
+    - sudo
     # - gcc
     # - make
     # - gdb
