@@ -8,5 +8,6 @@ FROM scratch
 COPY --from=builder /target-rootfs/ /
 LABEL containers.bootc=1
 LABEL ostree.bootable=1
+LABEL org.opencontainers.image.version="45"
 STOPSIGNAL SIGRTMIN+3
 CMD ["/sbin/init"]

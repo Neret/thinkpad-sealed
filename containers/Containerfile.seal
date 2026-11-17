@@ -10,7 +10,8 @@ FROM base AS slim
 RUN set -euo pipefail; \
     kver="$(cd /usr/lib/modules && echo *)"; \
     test -d "/usr/lib/modules/${kver}"; \
-    rm -f "/usr/lib/modules/${kver}/vmlinuz" "/usr/lib/modules/${kver}/initramfs.img"
+    rm -f "/usr/lib/modules/${kver}/vmlinuz" "/usr/lib/modules/${kver}/initramfs.img"; \
+    find /run /tmp -mindepth 1 -delete 2>/dev/null || true
 
 FROM ${TOOLS} AS buildroot
 RUN dnf install -y systemd-ukify systemd-udev sbsigntools openssl \
