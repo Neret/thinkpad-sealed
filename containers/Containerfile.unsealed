@@ -30,7 +30,8 @@ RUN rm -rf \
       /var/log/* \
       /run/dnf \
       /run/selinux-policy \
-      /var/lib/dnf/repos && \
+      /var/lib/dnf/repos \
+      /etc/selinux/targeted/previous && \
     find /run /tmp -mindepth 1 -delete 2>/dev/null || true
 
 # Appiattisce tutto in un solo layer:
