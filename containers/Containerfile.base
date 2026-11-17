@@ -1,7 +1,7 @@
-# syntax=docker/dockerfile:1
+# syntax=docker/dockerfile:1-labs
 FROM quay.io/fedora/fedora-bootc:45 AS builder
 
-RUN /usr/libexec/bootc-base-imagectl build-rootfs \
+RUN --security=insecure /usr/libexec/bootc-base-imagectl build-rootfs \
     --manifest=minimal / /target-rootfs
 
 FROM scratch
