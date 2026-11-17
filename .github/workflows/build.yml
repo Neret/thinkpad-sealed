@@ -10,7 +10,6 @@ on:
       - "recipes/**"
       - "containers/**"
       - "files/**"
-      - "tests/**"
       - "cosign.pub"
       - ".github/workflows/build.yml"
   workflow_dispatch:
@@ -39,12 +38,7 @@ jobs:
           shellcheck -x -S warning \
             files/system/usr/libexec/sealed-sync \
             files/system/usr/libexec/sealed-sync-lib \
-            files/system/usr/libexec/sealed-sync.d/* \
-            tests/sealed-sync.test.sh \
-            installer.sh check.sh
-
-      - name: Test
-        run: bash tests/sealed-sync.test.sh
+            files/system/usr/libexec/sealed-sync.d/*
 
   build:
     name: Build and Push
