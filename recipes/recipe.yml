@@ -23,6 +23,9 @@ modules:
     snippets:
       - useradd -D -s /usr/bin/zsh
       - ln -sf /usr/lib/systemd/system/graphical.target /etc/systemd/system/default.target
+      - chmod 0644 /usr/share/polkit-1/actions/com.bitwarden.Bitwarden.policy
+      - chown root:root /usr/share/polkit-1/actions/com.bitwarden.Bitwarden.policy
+      - chcon system_u:object_r:usr_t:s0 /usr/share/polkit-1/actions/com.bitwarden.Bitwarden.policy
 
   - type: systemd
     system:
