@@ -2,8 +2,8 @@
 ---
 version: 1
 name: fedora-bootc-sealed-os
-description: Host GNOME minimale e immutabile per ThinkPad T14s Gen1 AMD
-base-image: quay.io/fedora/fedora-bootc
+description: Minimal Fedora bootc GNOME image for the ThinkPad T14s Gen 1 AMD
+base-image: ghcr.io/neret/fedora-bootc-sealed-os-minimal-base
 image-version: 45
 
 modules:
@@ -18,9 +18,8 @@ modules:
       - zz0-thinkpad.gschema.override
 
   - type: script
-    scripts:
-      - assets.sh
     snippets:
+      - useradd -D -s /usr/bin/zsh
       - ln -sf /usr/lib/systemd/system/graphical.target /etc/systemd/system/default.target
 
   - type: systemd
@@ -31,9 +30,8 @@ modules:
         - systemd-resolved.service
         - bluetooth.service
         - firewalld.service
+        - power-profiles-daemon.service
         - sealed-sync.service
-      disabled:
-        - sshd.service
 
   - from-file: flatpaks.yml
 

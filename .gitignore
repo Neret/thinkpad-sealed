@@ -1,9 +1,1 @@
-# Secure Boot private keys (mai committare)
-secureboot/MOK.key
-secureboot/MOK-ci.key
-secureboot/cosign.key
-
-# Backup
-*.bak
 *.key
-.aider*

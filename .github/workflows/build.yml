@@ -8,6 +8,7 @@ on:
       - main
     paths:
       - "recipes/**"
+      - "containers/**"
       - "files/**"
       - "tests/**"
       - "cosign.pub"
@@ -26,7 +27,7 @@ jobs:
     permissions:
       contents: read
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v4
 
       - name: Installa sbsigntool
         run: |
@@ -55,9 +56,26 @@ jobs:
       packages: write
 
     steps:
+      - uses: actions/checkout@v4
+
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ github.token }}
+
+      - name: Build and publish Fedora Minimal bootc base
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: containers/Containerfile.base
+          push: true
+          tags: ghcr.io/neret/fedora-bootc-sealed-os-minimal-base:45
+
       - name: Build Custom Image
         uses: blue-build/github-action@v1
         with:
-          recipe: recipe.yml
+          recipe: recipes/recipe.yml
           cosign_private_key: ${{ secrets.SIGNING_SECRET }}
           registry_token: ${{ github.token }}

@@ -1,0 +1,12 @@
+# syntax=docker/dockerfile:1
+FROM quay.io/fedora/fedora-bootc:45 AS builder
+
+RUN /usr/libexec/bootc-base-imagectl build-rootfs \
+    --manifest=minimal / /target-rootfs
+
+FROM scratch
+COPY --from=builder /target-rootfs/ /
+LABEL containers.bootc=1
+LABEL ostree.bootable=1
+STOPSIGNAL SIGRTMIN+3
+CMD ["/sbin/init"]

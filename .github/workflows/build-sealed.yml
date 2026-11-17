@@ -24,7 +24,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 120
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v4
 
       - name: Free disk space
         run: sudo rm -rf /usr/share/dotnet /opt/ghc /usr/local/lib/android /opt/hostedtoolcache
@@ -50,7 +50,7 @@ jobs:
       - name: Build unsealed image (systemd-boot firmato, senza bootupd)
         run: |
           sudo podman build --pull=always \
-            -f seal/Containerfile.unsealed \
+            -f containers/Containerfile.unsealed \
             -t "localhost/unsealed:${TAG}" \
             --secret "id=key,src=${RUNNER_TEMP}/mok.key" \
             --secret "id=cert,src=${RUNNER_TEMP}/mok.crt" \
@@ -59,7 +59,7 @@ jobs:
       - name: Build slim image (su questa si calcola il digest)
         run: |
           sudo podman build --pull=never \
-            -f seal/Containerfile.seal --target slim \
+            -f containers/Containerfile.seal --target slim \
             --build-arg "UNSEALED=localhost/unsealed:${TAG}" \
             -t "localhost/slim:${TAG}" \
             .
@@ -81,7 +81,7 @@ jobs:
       - name: Build sealed image (UKI firmata con la chiave MOK)
         run: |
           sudo podman build --pull=missing \
-            -f seal/Containerfile.seal --target final \
+            -f containers/Containerfile.seal --target final \
             --build-arg "UNSEALED=localhost/unsealed:${TAG}" \
             --build-arg "COMPOSEFS_V1=${COMPOSEFS_V1}" \
             --build-arg "COMPOSEFS_V2=${COMPOSEFS_V2}" \

@@ -12,92 +12,117 @@ install:
     # ---------------------------------------------------------
     - gdm
     - gnome-shell
+    - gnome-session
     - gnome-session-wayland-session
     - gnome-settings-daemon
     - gnome-control-center
+    - gnome-initial-setup
     - gnome-keyring
     - gnome-keyring-pam
+    - gnome-bluetooth
     - nautilus
     - ptyxis
+    - gvfs
+    - gvfs-mtp
+    - gvfs-smb
+    - udisks2
+    - xdg-desktop-portal
     - xdg-desktop-portal-gnome
     - xdg-desktop-portal-gtk
+    - xdg-user-dirs
     - xdg-user-dirs-gtk
     - xdg-utils
-    # - gnome-initial-setup
     # - gnome-tweaks
     # - gnome-shell-extension-gsconnect
     # - gnome-extensions-app
 
+    # Supporto per filesystem e dispositivi rimovibili
+    - btrfs-progs
+    - dosfstools
+    - exfatprogs
+    - ntfs-3g
+    - udftools
+    - xfsprogs
+
     # ---------------------------------------------------------
     # Networking
     # ---------------------------------------------------------
+    - NetworkManager
     - NetworkManager-wifi
     - NetworkManager-bluetooth
     - wpa_supplicant
+    - openssh-clients
+    - bluez
     - firewalld
+    - systemd-resolved
+    # - NetworkManager-cloud-setup
+    # - nmstate
+    # - nmap
+    # - iperf3
+    # - mtr
+    # - traceroute
+    # - bind-utils
 
     # ---------------------------------------------------------
-    # Security / Storage
+    # Boot, sicurezza e storage
     # ---------------------------------------------------------
     - sbsigntools
+    - systemd-boot-unsigned
+    - shim-x64
+    - mokutil
+    - efibootmgr
+    - openssl
+    - fprintd
+    - fprintd-pam
+    - zram-generator-defaults
 
-    # ---------------------------------------------------------
-    # Audio & Power Management
-    # ---------------------------------------------------------
+    # Audio, power, and firmware updates
     - pipewire
     - pipewire-pulseaudio
     - wireplumber
     - alsa-ucm
-    - bluez
     - upower
     - power-profiles-daemon
-    - fprintd
-    - fprintd-pam
+    - fwupd
 
     # ---------------------------------------------------------
-    # Firmware & Drivers
+    # Firmware e hardware ThinkPad T14s Gen 1 AMD
     # ---------------------------------------------------------
+    - amd-gpu-firmware
+    - amd-ucode-firmware
     - iwlwifi-mvm-firmware
-
-    # ---------------------------------------------------------
-    # Graphics / VA-API
-    # ---------------------------------------------------------
     - mesa-dri-drivers
     - mesa-vulkan-drivers
     - mesa-va-drivers-freeworld
 
-    # ---------------------------------------------------------
-    # Boot
-    # ---------------------------------------------------------
-    - systemd-boot-unsigned
-    - zram-generator-defaults
-
-    # ---------------------------------------------------------
-    # Flatpak
-    # ---------------------------------------------------------
+    # Flatpak applications are installed separately by flatpaks.yml
     - flatpak
 
-    # ---------------------------------------------------------
-    # Localization
-    # ---------------------------------------------------------
+    # Italian and English locales
     - glibc-langpack-it
     - glibc-langpack-en
 
-    # ---------------------------------------------------------
-    # Shell & CLI — host
-    # ---------------------------------------------------------
+    # User shell and command-line tools
     - zsh
     - zsh-autosuggestions
     - zsh-syntax-highlighting
+    - shadow-utils
+    - starship
     - zoxide
     - bat
     - eza
     - fd-find
     - fzf
     - ripgrep
+    - ugrep
     - micro
     - git-core
     - which
+    - curl
+    # - gcc
+    # - make
+    # - gdb
+    # - mise (richiede un repository aggiuntivo o installazione separata)
 
     # ---------------------------------------------------------
     # Diagnostica hardware — host
@@ -106,6 +131,7 @@ install:
     - usbutils
     - dmidecode
     - smartmontools
+    - nvme-cli
     - tcpdump
 
     # ---------------------------------------------------------
@@ -134,6 +160,9 @@ install:
     # ---------------------------------------------------------
     # Containers / Dev — futuri
     # ---------------------------------------------------------
+    - podman
+    - fuse-overlayfs
+    - toolbox
     - distrobox
     # - buildah
     # - crane
@@ -150,17 +179,6 @@ install:
     # - gstreamer1-plugins-ugly
     # - gstreamer1-plugin-libav
     # - gstreamer1-vaapi
-
-    # ---------------------------------------------------------
-    # Networking tools — futuri
-    # ---------------------------------------------------------
-    # - NetworkManager-cloud-setup
-    # - nmstate
-    # - nmap
-    # - iperf3
-    # - mtr
-    # - traceroute
-    # - bind-utils
 
     # ---------------------------------------------------------
     # Backup / Sync — futuri

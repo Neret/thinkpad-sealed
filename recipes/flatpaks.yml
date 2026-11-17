@@ -9,6 +9,7 @@ configurations:
       title: Flathub
     install:
       - com.github.tchx84.Flatseal
+      - org.gnome.Extensions
       - de.haeckerfelix.Fragments
       - io.github.flattool.Warehouse
       - io.missioncenter.MissionCenter
@@ -30,3 +31,6 @@ configurations:
       - org.mozilla.firefox
       - org.localsend.localsend_app
       - com.bitwarden.desktop
+      # - org.gnome.Boxes
+      # - com.github.wwmm.easyeffects
+      # - com.github.jeromerobert.pdfarranger
