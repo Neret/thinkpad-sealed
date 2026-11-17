@@ -120,6 +120,7 @@ install:
     - tar
     - ncurses
     - sudo
+    - nano
     # - gcc
     # - make
     # - gdb

@@ -1,23 +1,11 @@
-# ~/.zshrc
-
 HISTFILE="$HOME/.zsh_history"
 HISTSIZE=50000
 SAVEHIST=50000
 
-setopt SHARE_HISTORY
-setopt HIST_IGNORE_ALL_DUPS
-setopt HIST_IGNORE_SPACE
-setopt HIST_REDUCE_BLANKS
-setopt AUTO_CD
-setopt INTERACTIVE_COMMENTS
+setopt SHARE_HISTORY HIST_IGNORE_ALL_DUPS HIST_IGNORE_SPACE HIST_REDUCE_BLANKS AUTO_CD INTERACTIVE_COMMENTS
 
 autoload -Uz compinit
-
-if (( EUID == 0 )); then
-    compinit -u
-else
-    compinit
-fi
+if (( EUID == 0 )); then compinit -u; else compinit; fi
 
 zstyle ':completion:*' menu select
 zstyle ':completion:*' matcher-list 'm:{a-z}={A-Za-z}'
@@ -26,6 +14,8 @@ if (( $+commands[dircolors] )) && [[ -r "$HOME/.dircolors" ]]; then
     eval "$(dircolors -b "$HOME/.dircolors")"
     zstyle ':completion:*' list-colors "${(s.:.)LS_COLORS}"
 fi
+
+(( $+commands[sudo] )) && alias sudo='sudo '
 
 if (( $+commands[eza] )); then
     alias ls='eza --icons=auto --group-directories-first'
@@ -47,7 +37,6 @@ if (( $+commands[bat] )); then
 fi
 
 if (( $+commands[ug] )); then
-    alias ug='ug'
     alias uge='ug -E'
     alias ugf='ug -F'
     alias ugz='ug -z'
@@ -59,39 +48,8 @@ if (( ! $+commands[fd] && $+commands[fdfind] )); then
     alias fd='fdfind'
 fi
 
-if (( $+commands[rg] )); then
-    alias rgh='rg --smart-case --hidden --glob "!.git"'
-fi
-
-if (( $+commands[xdg-open] )); then
-    alias open='xdg-open >/dev/null'
-fi
-
-if (( $+commands[zoxide] )); then
-    eval "$(zoxide init zsh)"
-fi
-
-if (( $+commands[fzf] )); then
-    source <(fzf --zsh)
-fi
-
-_zsh_load_plugin() {
-    local plugin="$1"
-    local dir
-
-    for dir in /usr/share /run/host/usr/share; do
-        if [[ -r "$dir/$plugin/$plugin.zsh" ]]; then
-            source "$dir/$plugin/$plugin.zsh"
-            return 0
-        fi
-    done
-
-    return 1
-}
-
-_zsh_load_plugin zsh-autosuggestions
-_zsh_load_plugin zsh-syntax-highlighting
-unset -f _zsh_load_plugin
+(( $+commands[rg] )) && alias rgh='rg --smart-case --hidden --glob "!.git"'
+(( $+commands[xdg-open] )) && alias open='xdg-open >/dev/null'
 
 apue() {
     if (( $# != 1 )); then
@@ -114,19 +72,30 @@ apue() {
         -pthread
 }
 
-if (( $+commands[mise] )); then
-    if [[ "$MISE_ZSH_AUTO_ACTIVATE" != '0' ]]; then
-        eval "$(mise activate zsh)"
-    fi
-fi
+(( $+commands[zoxide] )) && eval "$(zoxide init zsh)"
+(( $+commands[fzf] )) && source <(fzf --zsh)
+(( $+commands[mise] )) && eval "$(mise activate zsh)"
 
 if (( $+commands[starship] )); then
     eval "$(starship init zsh)"
+elif [[ -f /run/.containerenv && -f /etc/os-release ]]; then
+    . /etc/os-release
+    PS1="%F{green}%n@$ID%f %B%F{blue}%~%f%b %# "
 else
-    if [[ -f /run/.containerenv && -f /etc/os-release ]]; then
-        . /etc/os-release
-        PS1="%F{green}%n@$ID%f %B%F{blue}%~%f%b %# "
-    else
-        PS1="%F{green}%n@fedora%f %B%F{blue}%~%f%b %# "
-    fi
+    PS1="%F{green}%n@fedora%f %B%F{blue}%~%f%b %# "
 fi
+
+_zsh_load_plugin() {
+    local plugin="$1" dir
+    for dir in /usr/share /run/host/usr/share; do
+        if [[ -r "$dir/$plugin/$plugin.zsh" ]]; then
+            source "$dir/$plugin/$plugin.zsh"
+            return 0
+        fi
+    done
+    return 1
+}
+
+_zsh_load_plugin zsh-autosuggestions
+_zsh_load_plugin zsh-syntax-highlighting
+unset -f _zsh_load_plugin
