@@ -1,0 +1,116 @@
+# ==============================================================================
+# STARSHIP CONFIGURATION - Definitivo & Corretto
+# ==============================================================================
+
+add_newline = true
+command_timeout = 500
+
+format = """
+$os\
+[](fg:#1e1e2e bg:#313244)\
+[$directory](bg:#313244 fg:#cdd6f4 bold)\
+[](fg:#313244 bg:#1e1e2e)\
+[$git_branch$git_status](bg:#1e1e2e fg:#f9e2af)\
+[$c$cpp$rust$golang$java$nodejs$python$docker_context](bg:#1e1e2e)\
+$duration\
+[](fg:#1e1e2e bg:#11111b)\
+\n$character"""
+
+# ------------------------------------------------------------------------------
+# Operating System (Pinguino Linux)
+# ------------------------------------------------------------------------------
+[os]
+disabled = false
+style = "bg:#1e1e2e fg:#89b4fa"
+format = "[ $symbol ]($style)"
+
+[os.symbols]
+Linux = ""
+
+# ------------------------------------------------------------------------------
+# Directory & Path
+# ------------------------------------------------------------------------------
+[directory]
+format = "[ $path ]($style)"
+truncation_length = 3
+truncation_symbol = "…/"
+style = "bg:#313244 fg:#cdd6f4"
+
+# ------------------------------------------------------------------------------
+# Git Integration
+# ------------------------------------------------------------------------------
+[git_branch]
+symbol = "  "
+format = "[$symbol$branch]($style)"
+style = "bg:#1e1e2e fg:#f9e2af bold"
+
+[git_status]
+format = '([\[$all_status$ahead_behind\]]($style))'
+style = "bg:#1e1e2e fg:#f38ba8"
+conflicted = "󰞇 "
+ahead = "⇡${count}"
+behind = "⇣${count}"
+diverged = "⇕⇡${ahead}⇣${behind}"
+up_to_date = ""
+untracked = "?${count}"
+modified = "!${count}"
+staged = "+${count}"
+renamed = "»${count}"
+deleted = "✘${count}"
+
+# ------------------------------------------------------------------------------
+# Linguaggi & Container (Appaiono solo se rilevati nel contesto)
+# ------------------------------------------------------------------------------
+[nodejs]
+symbol = " 󰎙 "
+format = "[$symbol($version)]($style)"
+style = "bg:#1e1e2e fg:#a6e3a1"
+
+[python]
+symbol = "  "
+format = "[$symbol($version)]($style)"
+style = "bg:#1e1e2e fg:#f9e2af"
+
+[rust]
+symbol = " 󱘗 "
+format = "[$symbol($version)]($style)"
+style = "bg:#1e1e2e fg:#fab387"
+
+[golang]
+symbol = " 󰟓 "
+format = "[$symbol($version)]($style)"
+style = "bg:#1e1e2e fg:#89dceb"
+
+[java]
+symbol = " 󰬷 "
+format = "[$symbol($version)]($style)"
+style = "bg:#1e1e2e fg:#eba0ac"
+
+[c]
+symbol = " 󰙱 "
+format = "[$symbol($version(-$name))]($style)"
+style = "bg:#1e1e2e fg:#89b4fa"
+
+[cpp]
+symbol = " 󰙲 "
+format = "[$symbol($version(-$name))]($style)"
+style = "bg:#1e1e2e fg:#89b4fa"
+
+[docker_context]
+symbol = " 󰡨 "
+format = "[$symbol $context]($style)"
+style = "bg:#1e1e2e fg:#74c7ec"
+disabled = false
+
+# ------------------------------------------------------------------------------
+# Metriche di Esecuzione
+# ------------------------------------------------------------------------------
+[duration]
+min_threshold = 1000
+format = "[ took $duration ]($style)"
+style = "fg:#fab387 italic"
+
+[character]
+success_symbol = "[❯](bold #89b4fa)"
+error_symbol = "[❯](bold #f38ba8)"
+vimcmd_symbol = "[❮](bold #a6e3a1)"

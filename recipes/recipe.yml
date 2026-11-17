@@ -18,6 +18,8 @@ modules:
       - zz0-thinkpad.gschema.override
 
   - type: script
+    scripts:
+      - assets.sh
     snippets:
       - useradd -D -s /usr/bin/zsh
       - ln -sf /usr/lib/systemd/system/graphical.target /etc/systemd/system/default.target

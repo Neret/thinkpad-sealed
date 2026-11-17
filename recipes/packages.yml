@@ -93,7 +93,6 @@ install:
     - iwlwifi-mvm-firmware
     - mesa-dri-drivers
     - mesa-vulkan-drivers
-    - mesa-va-drivers-freeworld
 
     # Flatpak applications are installed separately by flatpaks.yml
     - flatpak
@@ -107,7 +106,6 @@ install:
     - zsh-autosuggestions
     - zsh-syntax-highlighting
     - shadow-utils
-    - starship
     - zoxide
     - bat
     - eza
