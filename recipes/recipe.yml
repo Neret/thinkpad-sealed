@@ -35,7 +35,7 @@ modules:
         - bluetooth.service
         - firewalld.service
         - power-profiles-daemon.service
-        - sealed-sync.service
+        - systemd-boot-update.service
 
   - from-file: flatpaks.yml
 

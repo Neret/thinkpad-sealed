@@ -2,64 +2,55 @@
 ARG UNSEALED=ghcr.io/neret/fedora-bootc-sealed-os:unsealed-latest
 ARG TOOLS=quay.io/fedora/fedora:45
 
-FROM ${UNSEALED} AS base
+FROM ${UNSEALED} AS rootfs
 
-# Rootfs finale senza kernel/initramfs grezzi.
-# IL DIGEST COMPOSEFS DEVE ESSERE CALCOLATO SU QUESTA IMMAGINE.
-FROM base AS slim
-RUN set -euo pipefail; \
-    kver="$(cd /usr/lib/modules && echo *)"; \
-    test -d "/usr/lib/modules/${kver}"; \
-    rm -f "/usr/lib/modules/${kver}/vmlinuz" "/usr/lib/modules/${kver}/initramfs.img"; \
-    find /run /tmp -mindepth 1 -delete 2>/dev/null || true
+RUN bootc container lint --fatal-warnings
+
+FROM rootfs AS split
+RUN bootc container split-kernel-and-rootfs \
+    --rootfs / \
+    --output /kernel
 
 FROM ${TOOLS} AS buildroot
 RUN dnf install -y systemd-ukify systemd-udev sbsigntools openssl \
       systemd-boot-unsigned && dnf clean all
 
-FROM buildroot AS kernel
-ARG COMPOSEFS_V1
-ARG COMPOSEFS_V2
-ARG KARGS_EXTRA=""
-RUN --mount=type=secret,id=key \
+FROM buildroot AS uki
+RUN --mount=type=bind,from=split,target=/target \
+    --mount=type=bind,from=split,source=/kernel,target=/kernel \
+    --mount=type=secret,id=key \
     --mount=type=secret,id=cert \
-    --mount=type=bind,from=base,target=/kernel-src \
-    --mount=type=bind,from=slim,target=/rootfs <<'EOF'
+    --mount=type=secret,id=pcr-key \
+    --mount=type=secret,id=pcr-cert <<'EOF'
 set -euo pipefail
-test -n "${COMPOSEFS_V1}" && test -n "${COMPOSEFS_V2}"
 
-kver=$(find /kernel-src/usr/lib/modules -mindepth 1 -maxdepth 1 -type d -printf '%f\n' | sort -V | tail -n1)
+kver=$(ls /kernel)
 test -n "${kver}"
-test -d "/kernel-src/usr/lib/modules/${kver}"
-test -f "/kernel-src/usr/lib/modules/${kver}/vmlinuz"
-test -f "/kernel-src/usr/lib/modules/${kver}/initramfs.img"
-
-cmdline="composefs.digest=v1-sha512-12:${COMPOSEFS_V1} composefs=${COMPOSEFS_V2} rd.luks.options=tpm2-device=auto vconsole.keymap=it rw rhgb quiet amd_iommu=on iommu=pt mitigations=auto zswap.enabled=0 ${KARGS_EXTRA}"
+test -d "/kernel/${kver}"
 
 mkdir -p /out
-ukify build \
-  --linux "/kernel-src/usr/lib/modules/${kver}/vmlinuz" \
-  --initrd "/kernel-src/usr/lib/modules/${kver}/initramfs.img" \
-  --uname "${kver}" \
-  --cmdline "${cmdline}" \
-  --os-release "@/rootfs/usr/lib/os-release" \
+
+bootc container ukify \
+  --rootfs /target \
+  --kernel-dir "/kernel/${kver}" \
+  -- \
+  --output "/out/${kver}.efi" \
   --signtool sbsign \
   --secureboot-private-key /run/secrets/key \
   --secureboot-certificate /run/secrets/cert \
-  --measure \
-  --output "/out/${kver}.efi"
+  --stub "/target/usr/lib/systemd/boot/efi/linuxx64.elf.stub" \
+  --pcr-private-key /run/secrets/pcr-key \
+  --pcr-public-key /run/secrets/pcr-cert \
+  --phases enter-initrd
 EOF
 
-# Immagine finale: rootfs slim + UKI firmata.
-# La UKI viene aggiunta DOPO il calcolo del digest.
-FROM slim AS final
-RUN --mount=type=bind,from=kernel,target=/run/kernel <<'EOF'
+FROM split AS final
+RUN --mount=type=bind,from=uki,target=/run/uki <<'EOF'
 set -euo pipefail
-kver="$(cd /usr/lib/modules && echo *)"
+kver=$(ls /kernel)
 test -n "${kver}"
 mkdir -p /boot/EFI/Linux
-cp "/run/kernel/out/${kver}.efi" "/boot/EFI/Linux/${kver}.efi"
-bootc container lint --fatal-warnings
+cp "/run/uki/out/${kver}.efi" "/boot/EFI/Linux/${kver}.efi"
 EOF
 
-LABEL containers.bootc=sealed
+LABEL containers.bootc=1
