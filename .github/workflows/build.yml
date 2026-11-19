@@ -36,9 +36,6 @@ jobs:
       - name: ShellCheck
         run: |
           shellcheck -x -S warning \
-            files/system/usr/libexec/sealed-sync \
-            files/system/usr/libexec/sealed-sync-lib \
-            files/system/usr/libexec/sealed-sync.d/* \
             files/scripts/*.sh
 
   build:

@@ -37,17 +37,20 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: echo "$GH_TOKEN" | sudo podman login ghcr.io -u "$GITHUB_ACTOR" --password-stdin
 
-      - name: Write signing key
+      - name: Write signing keys
         env:
           SB_KEY: ${{ secrets.SECUREBOOT_KEY }}
           SB_CERT: ${{ secrets.SECUREBOOT_CERT }}
+          PCR_KEY: ${{ secrets.PCR_PRIVATE_KEY }}
+          PCR_CERT: ${{ secrets.PCR_PUBLIC_KEY }}
         run: |
           umask 077
           printf '%s\n' "$SB_KEY" > "$RUNNER_TEMP/mok.key"
           printf '%s\n' "$SB_CERT" > "$RUNNER_TEMP/mok.crt"
+          printf '%s\n' "$PCR_KEY" > "$RUNNER_TEMP/pcr.key"
+          printf '%s\n' "$PCR_CERT" > "$RUNNER_TEMP/pcr.crt"
 
-      # Tutto resta nello stesso storage: niente immagine "unsealed" nel registry.
-      - name: Build unsealed image (systemd-boot firmato, senza bootupd)
+      - name: Build unsealed image (systemd-boot firmato, senza bootupd e dnf5)
         run: |
           sudo podman build --pull=always \
             -f containers/Containerfile.unsealed \
@@ -56,61 +59,17 @@ jobs:
             --secret "id=cert,src=${RUNNER_TEMP}/mok.crt" \
             .
 
-      - name: Build slim image (su questa si calcola il digest)
+      - name: Build sealed image (UKI firmata con chiave MOK e policy PCR)
         run: |
           sudo podman build --pull=never \
-            -f containers/Containerfile.seal --target slim \
-            --build-arg "UNSEALED=localhost/unsealed:${TAG}" \
-            -t "localhost/slim:${TAG}" \
-            .
-
-      # Stessa vista di "bootc install": digest dallo storage, con il bootc dell'immagine.
-      - name: Compute composefs digests from storage
-        run: |
-          for v in v1 v2; do
-            d="$(sudo podman run --rm --privileged --pid=host --security-opt label=disable \
-              -v /var/lib/containers:/var/lib/containers \
-              "localhost/slim:${TAG}" \
-              bootc container compute-composefs-digest-from-storage \
-              --erofs-version "$v" "localhost/slim:${TAG}" | tail -n1)"
-            [[ "$d" =~ ^[0-9a-f]{128}$ ]] || { echo "digest ${v} non valido: ${d}"; exit 1; }
-            echo "COMPOSEFS_${v^^}=${d}" >> "$GITHUB_ENV"
-            echo "composefs ${v}: ${d}"
-          done
-
-      - name: Build sealed image (UKI firmata con la chiave MOK)
-        run: |
-          sudo podman build --pull=missing \
             -f containers/Containerfile.seal --target final \
             --build-arg "UNSEALED=localhost/unsealed:${TAG}" \
-            --build-arg "COMPOSEFS_V1=${COMPOSEFS_V1}" \
-            --build-arg "COMPOSEFS_V2=${COMPOSEFS_V2}" \
             --secret "id=key,src=${RUNNER_TEMP}/mok.key" \
             --secret "id=cert,src=${RUNNER_TEMP}/mok.crt" \
+            --secret "id=pcr-key,src=${RUNNER_TEMP}/pcr.key" \
+            --secret "id=pcr-cert,src=${RUNNER_TEMP}/pcr.crt" \
             -t "${IMAGE}:${TAG}" \
             .
-
-      # Controllo rapido (secondi): la UKI porta sia il digest v1 sia il v2 nella command line,
-      # quindi devono coincidere ENTRAMBI con quelli dell'immagine finale.
-      - name: Check final image digest matches the one in the UKI
-        run: |
-          ok=0
-          for v in v1 v2; do
-            d="$(sudo podman run --rm --privileged --pid=host --security-opt label=disable \
-              -v /var/lib/containers:/var/lib/containers \
-              "${IMAGE}:${TAG}" \
-              bootc container compute-composefs-digest-from-storage \
-              --erofs-version "$v" "${IMAGE}:${TAG}" | tail -n1)"
-            var="COMPOSEFS_${v^^}"
-            echo "${v}: finale=${d}"
-            echo "${v}: uki   =${!var}"
-            if [ "$d" = "${!var}" ]; then
-              ok=$((ok + 1))
-            else
-              echo "ERRORE: il digest ${v} dell'immagine finale non coincide con quello nella UKI"
-            fi
-          done
-          [ "$ok" = 2 ] || { echo "Digest v1/v2 non coincidenti con la UKI: immagine non pubblicata"; exit 1; }
 
       - name: Verify signatures
         run: |
@@ -126,8 +85,6 @@ jobs:
             echo "- UKI: $(ls -lh "$RUNNER_TEMP/uki.efi" | awk '{print $5}')"
           } >> "$GITHUB_STEP_SUMMARY"
 
-      # Se il digest nella UKI non coincide con l'immagine, bootc install fallisce qui
-      # e l'immagine non viene pubblicata.
       - name: Rehearsal - bootc install su disco loopback
         run: |
           sudo mkdir -p /mnt/rehearsal
@@ -146,6 +103,6 @@ jobs:
           sudo podman tag "${IMAGE}:${TAG}" "${IMAGE}:sealed"
           sudo podman push "${IMAGE}:sealed"
 
-      - name: Remove signing key
+      - name: Remove signing keys
         if: always()
-        run: shred -u "$RUNNER_TEMP/mok.key" "$RUNNER_TEMP/mok.crt" || true
+        run: shred -u "$RUNNER_TEMP/mok.key" "$RUNNER_TEMP/mok.crt" "$RUNNER_TEMP/pcr.key" "$RUNNER_TEMP/pcr.crt" || true
