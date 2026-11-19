@@ -3,7 +3,6 @@
 type: dnf
 repos:
   cleanup: true
-  nonfree: rpmfusion
 
 install:
   packages:
