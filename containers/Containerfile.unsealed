@@ -7,6 +7,10 @@ RUN if rpm -q bootupd >/dev/null 2>&1; then \
       dnf remove -y bootupd; \
     fi
 
+RUN if rpm -q dnf5 >/dev/null 2>&1; then \
+      dnf remove -y dnf5; \
+    fi
+
 RUN rm -rf \
       /var/cache/dnf \
       /var/cache/libdnf5 \
