@@ -5,5 +5,6 @@ kargs = [
   "amd_iommu=on",
   "iommu=pt",
   "zswap.enabled=0",
+  "rhgb",
   "quiet"
 ]

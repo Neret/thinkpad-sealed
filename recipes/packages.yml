@@ -24,6 +24,7 @@ install:
     - gvfs
     - gvfs-mtp
     - gvfs-smb
+    - plymouth
     - udisks2
     - xdg-desktop-portal
     - xdg-desktop-portal-gnome
