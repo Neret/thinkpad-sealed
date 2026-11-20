@@ -1,6 +1,22 @@
+# syntax=docker/dockerfile:1
 ARG BASE=ghcr.io/neret/fedora-bootc-sealed-os:latest
 
-FROM ${BASE} AS builder
+FROM ${BASE} AS base
+
+FROM quay.io/fedora/fedora-bootc:45 AS sign
+RUN dnf install -y sbsigntools && dnf clean all
+RUN --mount=type=bind,from=base,target=/target \
+    --mount=type=secret,id=key \
+    --mount=type=secret,id=cert <<'EOF'
+set -euo pipefail
+mkdir -p /out
+sbsign --key /run/secrets/key --cert /run/secrets/cert \
+  --output /out/systemd-bootx64.efi \
+  /target/usr/lib/systemd/boot/efi/systemd-bootx64.efi
+EOF
+
+FROM base AS builder
+COPY --from=sign /out/systemd-bootx64.efi /usr/lib/systemd/boot/efi/systemd-bootx64.efi
 
 RUN if rpm -q bootupd >/dev/null 2>&1; then \
       dnf remove -y bootupd; \

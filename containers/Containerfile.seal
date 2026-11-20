@@ -28,6 +28,13 @@ kver=$(ls /kernel)
 test -n "${kver}"
 test -d "/kernel/${kver}"
 
+stub="/target/usr/lib/systemd/boot/efi/linuxx64.efi.stub"
+if [ ! -f "$stub" ]; then
+  echo "stub assente nel rootfs:"
+  ls -l /target/usr/lib/systemd/boot/efi/ || true
+  exit 1
+fi
+
 mkdir -p /out
 
 bootc container ukify \
@@ -38,7 +45,7 @@ bootc container ukify \
   --signtool sbsign \
   --secureboot-private-key /run/secrets/key \
   --secureboot-certificate /run/secrets/cert \
-  --stub "/target/usr/lib/systemd/boot/efi/linuxx64.elf.stub" \
+  --stub "$stub" \
   --pcr-private-key /run/secrets/pcr-key \
   --pcr-public-key /run/secrets/pcr-cert \
   --phases enter-initrd
