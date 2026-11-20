@@ -1,4 +1,3 @@
-[[kargs]]
 kargs = [
   "rw",
   "rd.luks.options=tpm2-device=auto",
