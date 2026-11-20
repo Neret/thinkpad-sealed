@@ -61,7 +61,7 @@ jobs:
 
       - name: Build sealed image (UKI firmata con chiave MOK e policy PCR)
         run: |
-          sudo podman build --pull=never \
+          sudo podman build --pull=missing \
             -f containers/Containerfile.seal --target final \
             --build-arg "UNSEALED=localhost/unsealed:${TAG}" \
             --secret "id=key,src=${RUNNER_TEMP}/mok.key" \
