@@ -1,9 +1,7 @@
-# syntax=docker/dockerfile:1
 ARG UNSEALED=ghcr.io/neret/fedora-bootc-sealed-os:unsealed-latest
 ARG TOOLS=quay.io/fedora/fedora-bootc:45
 
 FROM ${UNSEALED} AS rootfs
-
 RUN bootc container lint --fatal-warnings
 
 FROM rootfs AS split
@@ -13,10 +11,12 @@ RUN bootc container split-kernel-and-rootfs \
 RUN find / -xdev \( -path /proc -o -path /sys \) -prune -o -type d -exec touch -c -m -d @0 {} +
 
 FROM ${TOOLS} AS buildroot
-RUN dnf install -y systemd-ukify systemd-udev sbsigntools openssl \
+RUN dnf install -y systemd-ukify systemd-udev sbsigntools openssl dracut \
       systemd-boot-unsigned && dnf clean all
 
 FROM buildroot AS uki
+
+ARG STRICT_BOOTC=0
 RUN --mount=type=bind,from=split,target=/target \
     --mount=type=bind,from=split,source=/kernel,target=/kernel \
     --mount=type=secret,id=key \
@@ -27,11 +27,33 @@ kver=$(ls /kernel)
 test -n "${kver}"
 test -d "/kernel/${kver}"
 
+tools_v="$(bootc --version | head -n1)"
+os_v="$(chroot /target /usr/bin/bootc --version 2>/dev/null | head -n1 || true)"
+if [ "${tools_v}" != "${os_v}" ]; then
+  msg="bootc diverso: tools='${tools_v}' immagine='${os_v:-non determinabile}'"
+  if [ "${STRICT_BOOTC}" = "1" ]; then echo "ERRORE: ${msg}"; exit 1; fi
+  echo "::warning::${msg}"
+fi
+
+initrd="/kernel/${kver}/initramfs.img"
+test -f "${initrd}"
+lst="$(mktemp)"
+lsinitrd "${initrd}" > "${lst}" 2>/dev/null
+missing=0
+for pat in bootc-root-setup.service systemd-cryptsetup libtss2 plymouth; do
+  if ! grep -q "${pat}" "${lst}"; then
+    echo "ERRORE: initramfs senza '${pat}' (rigenerala nella recipe)"
+    missing=1
+  fi
+done
+[ "${missing}" -eq 0 ] || exit 1
+
 stub="/target/usr/lib/systemd/boot/efi/linuxx64.efi.stub"
-if [ ! -f "$stub" ]; then
+if [ ! -f "${stub}" ]; then
+  echo "stub non nella rootfs, uso quello dei tools"
   stub="/usr/lib/systemd/boot/efi/linuxx64.efi.stub"
 fi
-test -f "$stub"
+test -f "${stub}"
 
 mkdir -p /out
 
@@ -43,7 +65,7 @@ bootc container ukify \
   --signtool sbsign \
   --secureboot-private-key /run/secrets/key \
   --secureboot-certificate /run/secrets/cert \
-  --stub "$stub"
+  --stub "${stub}"
 EOF
 
 FROM split AS final

@@ -66,12 +66,12 @@ install:
     # ---------------------------------------------------------
     # Boot, sicurezza e storage
     # ---------------------------------------------------------
-    - sbsigntools
-    - systemd-boot-unsigned
-    - shim-x64
-    - mokutil
-    - efibootmgr
-    - openssl
+    - systemd-boot-unsigned  
+    - shim-x64               
+    - mokutil                 
+    - efibootmgr              
+    - cryptsetup           
+    - tpm2-tss                
     - fprintd
     - fprintd-pam
     - zram-generator-defaults

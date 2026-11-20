@@ -1,18 +1,20 @@
-# syntax=docker/dockerfile:1
 ARG BASE=ghcr.io/neret/fedora-bootc-sealed-os:latest
+ARG SIGNER=quay.io/fedora/fedora-bootc:45
 
 FROM ${BASE} AS base
 
-FROM quay.io/fedora/fedora-bootc:45 AS sign
+FROM ${SIGNER} AS sign
 RUN dnf install -y sbsigntools && dnf clean all
 RUN --mount=type=bind,from=base,target=/target \
     --mount=type=secret,id=key \
     --mount=type=secret,id=cert <<'EOF'
 set -euo pipefail
+src=/target/usr/lib/systemd/boot/efi/systemd-bootx64.efi
+test -f "$src"
 mkdir -p /out
 sbsign --key /run/secrets/key --cert /run/secrets/cert \
-  --output /out/systemd-bootx64.efi \
-  /target/usr/lib/systemd/boot/efi/systemd-bootx64.efi
+  --output /out/systemd-bootx64.efi "$src"
+sbverify --cert /run/secrets/cert /out/systemd-bootx64.efi
 EOF
 
 FROM base AS builder

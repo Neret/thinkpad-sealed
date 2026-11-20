@@ -37,44 +37,53 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: echo "$GH_TOKEN" | sudo podman login ghcr.io -u "$GITHUB_ACTOR" --password-stdin
 
+      - name: Resolve pinned input images
+        run: |
+          set -euo pipefail
+          tools_digest="$(skopeo inspect --format '{{.Digest}}' docker://quay.io/fedora/fedora-bootc:45)"
+          base_digest="$(sudo skopeo inspect --format '{{.Digest}}' "docker://${IMAGE}:latest")"
+          {
+            echo "TOOLS=quay.io/fedora/fedora-bootc:45@${tools_digest}"
+            echo "BASE=${IMAGE}@${base_digest}"
+          } >> "$GITHUB_ENV"
+          {
+            echo "### Immagini di input"
+            echo "- TOOLS: ${tools_digest}"
+            echo "- BASE: ${base_digest}"
+          } >> "$GITHUB_STEP_SUMMARY"
+
       - name: Write signing keys
         env:
           SB_KEY: ${{ secrets.SECUREBOOT_KEY }}
           SB_CERT: ${{ secrets.SECUREBOOT_CERT }}
-          PCR_KEY: ${{ secrets.PCR_PRIVATE_KEY }}
-          PCR_CERT: ${{ secrets.PCR_PUBLIC_KEY }}
         run: |
           umask 077
           printf '%s\n' "$SB_KEY" > "$RUNNER_TEMP/mok.key"
           printf '%s\n' "$SB_CERT" > "$RUNNER_TEMP/mok.crt"
-          printf '%s\n' "$PCR_KEY" > "$RUNNER_TEMP/pcr.key"
-          printf '%s\n' "$PCR_CERT" > "$RUNNER_TEMP/pcr.crt"
 
       - name: Build unsealed image
         run: |
           sudo podman build --pull=always \
             -f containers/Containerfile.unsealed \
             -t "localhost/unsealed:${TAG}" \
+            --build-arg "BASE=${BASE}" \
+            --build-arg "SIGNER=${TOOLS}" \
             --secret "id=key,src=${RUNNER_TEMP}/mok.key" \
             --secret "id=cert,src=${RUNNER_TEMP}/mok.crt" \
             .
 
-      - name: Pull TOOLS image
-        run: sudo podman pull quay.io/fedora/fedora-bootc:45
-
-      - name: Build sealed image 
+      - name: Build sealed image
         run: |
           sudo podman build --pull=missing \
             -f containers/Containerfile.seal --target final \
             --build-arg "UNSEALED=localhost/unsealed:${TAG}" \
+            --build-arg "TOOLS=${TOOLS}" \
             --secret "id=key,src=${RUNNER_TEMP}/mok.key" \
             --secret "id=cert,src=${RUNNER_TEMP}/mok.crt" \
-            --secret "id=pcr-key,src=${RUNNER_TEMP}/pcr.key" \
-            --secret "id=pcr-cert,src=${RUNNER_TEMP}/pcr.crt" \
             -t "${IMAGE}:${TAG}" \
             .
 
-      - name: Verify signatures
+      - name: Verify signatures and units
         run: |
           sudo apt-get update -qq
           sudo apt-get install -y -qq sbsigntool
@@ -82,6 +91,7 @@ jobs:
           sudo podman run --rm "${IMAGE}:${TAG}" cat /usr/lib/systemd/boot/efi/systemd-bootx64.efi > "$RUNNER_TEMP/sdboot.efi"
           sbverify --cert "$RUNNER_TEMP/mok.crt" "$RUNNER_TEMP/uki.efi"
           sbverify --cert "$RUNNER_TEMP/mok.crt" "$RUNNER_TEMP/sdboot.efi"
+          sudo podman run --rm "${IMAGE}:${TAG}" systemctl --root=/ is-enabled systemd-boot-update.service
           {
             echo "### ${IMAGE}:${TAG}"
             echo "- certificato: $(openssl x509 -in "$RUNNER_TEMP/mok.crt" -noout -fingerprint -sha256)"
@@ -108,4 +118,4 @@ jobs:
 
       - name: Remove signing keys
         if: always()
-        run: shred -u "$RUNNER_TEMP/mok.key" "$RUNNER_TEMP/mok.crt" "$RUNNER_TEMP/pcr.key" "$RUNNER_TEMP/pcr.crt" || true
+        run: shred -u "$RUNNER_TEMP/mok.key" "$RUNNER_TEMP/mok.crt" || true
