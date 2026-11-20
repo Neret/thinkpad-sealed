@@ -1,6 +1,6 @@
 # syntax=docker/dockerfile:1
 ARG UNSEALED=ghcr.io/neret/fedora-bootc-sealed-os:unsealed-latest
-ARG TOOLS=quay.io/fedora/fedora:45
+ARG TOOLS=quay.io/fedora/fedora-bootc:45
 
 FROM ${UNSEALED} AS rootfs
 
