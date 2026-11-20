@@ -10,6 +10,7 @@ FROM rootfs AS split
 RUN bootc container split-kernel-and-rootfs \
     --rootfs / \
     --output /kernel
+RUN find / -xdev \( -path /proc -o -path /sys \) -prune -o -type d -exec touch -c -m -d @0 {} +
 
 FROM ${TOOLS} AS buildroot
 RUN dnf install -y systemd-ukify systemd-udev sbsigntools openssl \
@@ -19,9 +20,7 @@ FROM buildroot AS uki
 RUN --mount=type=bind,from=split,target=/target \
     --mount=type=bind,from=split,source=/kernel,target=/kernel \
     --mount=type=secret,id=key \
-    --mount=type=secret,id=cert \
-    --mount=type=secret,id=pcr-key \
-    --mount=type=secret,id=pcr-cert <<'EOF'
+    --mount=type=secret,id=cert <<'EOF'
 set -euo pipefail
 
 kver=$(ls /kernel)
@@ -30,10 +29,9 @@ test -d "/kernel/${kver}"
 
 stub="/target/usr/lib/systemd/boot/efi/linuxx64.efi.stub"
 if [ ! -f "$stub" ]; then
-  echo "stub assente nel rootfs:"
-  ls -l /target/usr/lib/systemd/boot/efi/ || true
-  exit 1
+  stub="/usr/lib/systemd/boot/efi/linuxx64.efi.stub"
 fi
+test -f "$stub"
 
 mkdir -p /out
 
@@ -45,10 +43,7 @@ bootc container ukify \
   --signtool sbsign \
   --secureboot-private-key /run/secrets/key \
   --secureboot-certificate /run/secrets/cert \
-  --stub "$stub" \
-  --pcr-private-key /run/secrets/pcr-key \
-  --pcr-public-key /run/secrets/pcr-cert \
-  --phases enter-initrd
+  --stub "$stub"
 EOF
 
 FROM split AS final
