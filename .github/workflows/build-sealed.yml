@@ -40,8 +40,9 @@ jobs:
       - name: Resolve pinned input images
         run: |
           set -euo pipefail
-          tools_digest="$(skopeo inspect --format '{{.Digest}}' docker://quay.io/fedora/fedora-bootc:45)"
+          tools_digest="$(sudo skopeo inspect --format '{{.Digest}}' docker://quay.io/fedora/fedora-bootc:45)"
           base_digest="$(sudo skopeo inspect --format '{{.Digest}}' "docker://${IMAGE}:latest")"
+          test -n "${tools_digest}" && test -n "${base_digest}"
           {
             echo "TOOLS=quay.io/fedora/fedora-bootc:45@${tools_digest}"
             echo "BASE=${IMAGE}@${base_digest}"
