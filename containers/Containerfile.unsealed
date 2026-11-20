@@ -40,8 +40,22 @@ RUN rm -rf \
       /etc/selinux/targeted/previous && \
     find /run /tmp -mindepth 1 -delete 2>/dev/null || true
 
+RUN bootc container lint --fatal-warnings
+
+FROM builder AS kernel-src
+RUN mkdir /kernel && \
+    bootc container split-kernel-and-rootfs --rootfs / --output /kernel
+
+FROM scratch AS kernel
+COPY --from=kernel-src /kernel /kernel
+
+FROM builder AS strip
+RUN mkdir /tmp/k && \
+    bootc container split-kernel-and-rootfs --rootfs / --output /tmp/k && \
+    rm -rf /tmp/k
+
 FROM scratch AS unsealed
-COPY --from=builder / /
+COPY --from=strip / /
 LABEL containers.bootc=1
 LABEL ostree.bootable=1
 LABEL org.opencontainers.image.title="fedora-bootc-sealed-os-unsealed"

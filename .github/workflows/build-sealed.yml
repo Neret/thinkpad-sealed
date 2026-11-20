@@ -64,28 +64,42 @@ jobs:
           printf '%s\n' "$SB_KEY" > "$RUNNER_TEMP/mok.key"
           printf '%s\n' "$SB_CERT" > "$RUNNER_TEMP/mok.crt"
 
-      - name: Build unsealed image
+      - name: Build unsealed image and kernel artifact
         run: |
-          sudo podman build --pull=always \
-            -f containers/Containerfile.unsealed \
-            -t "localhost/unsealed:${TAG}" \
-            --build-arg "BASE=${BASE}" \
-            --build-arg "SIGNER=${TOOLS}" \
-            --secret "id=key,src=${RUNNER_TEMP}/mok.key" \
-            --secret "id=cert,src=${RUNNER_TEMP}/mok.crt" \
-            .
+          for target in kernel unsealed; do
+            sudo podman build --pull=always \
+              -f containers/Containerfile.unsealed --target "${target}" \
+              -t "localhost/${target}:${TAG}" \
+              --build-arg "BASE=${BASE}" \
+              --build-arg "SIGNER=${TOOLS}" \
+              --secret "id=key,src=${RUNNER_TEMP}/mok.key" \
+              --secret "id=cert,src=${RUNNER_TEMP}/mok.crt" \
+              .
+          done
 
       - name: Build sealed image
         run: |
           sudo podman build --pull=missing \
             -f containers/Containerfile.seal --target final \
             --build-arg "UNSEALED=localhost/unsealed:${TAG}" \
+            --build-arg "KERNEL=localhost/kernel:${TAG}" \
             --build-arg "TOOLS=${TOOLS}" \
             --secret "id=key,src=${RUNNER_TEMP}/mok.key" \
             --secret "id=cert,src=${RUNNER_TEMP}/mok.crt" \
             -t "${IMAGE}:${TAG}" \
             .
 
+      - name: Report sizes
+        run: |
+          {
+            echo "### Dimensioni"
+            for img in "localhost/unsealed:${TAG}" "${IMAGE}:${TAG}"; do
+              echo "- ${img}: $(sudo podman image inspect --format '{{.Size}}' "${img}" | numfmt --to=iec)"
+            done
+          } >> "$GITHUB_STEP_SUMMARY"
+
+
+    
       - name: Verify signatures and units
         run: |
           sudo apt-get update -qq

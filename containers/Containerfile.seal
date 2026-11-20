@@ -1,13 +1,11 @@
+# syntax=docker/dockerfile:1
 ARG UNSEALED=ghcr.io/neret/fedora-bootc-sealed-os:unsealed-latest
+ARG KERNEL=localhost/kernel:latest
 ARG TOOLS=quay.io/fedora/fedora-bootc:45
 
-FROM ${UNSEALED} AS rootfs
-RUN bootc container lint --fatal-warnings
+FROM ${KERNEL} AS kernel
 
-FROM rootfs AS split
-RUN bootc container split-kernel-and-rootfs \
-    --rootfs / \
-    --output /kernel
+FROM ${UNSEALED} AS measured
 RUN find / -xdev \( -path /proc -o -path /sys \) -prune -o -type d -exec touch -c -m -d @0 {} +
 
 FROM ${TOOLS} AS buildroot
@@ -15,10 +13,9 @@ RUN dnf install -y systemd-ukify systemd-udev sbsigntools openssl dracut \
       systemd-boot-unsigned && dnf clean all
 
 FROM buildroot AS uki
-
 ARG STRICT_BOOTC=0
-RUN --mount=type=bind,from=split,target=/target \
-    --mount=type=bind,from=split,source=/kernel,target=/kernel \
+RUN --mount=type=bind,from=measured,target=/target \
+    --mount=type=bind,from=kernel,source=/kernel,target=/kernel \
     --mount=type=secret,id=key \
     --mount=type=secret,id=cert <<'EOF'
 set -euo pipefail
@@ -68,10 +65,10 @@ bootc container ukify \
   --stub "${stub}"
 EOF
 
-FROM split AS final
+FROM measured AS final
 RUN --mount=type=bind,from=uki,target=/run/uki <<'EOF'
 set -euo pipefail
-kver=$(ls /kernel)
+kver=$(ls /run/uki/out | sed 's/\.efi$//')
 test -n "${kver}"
 mkdir -p /boot/EFI/Linux
 cp "/run/uki/out/${kver}.efi" "/boot/EFI/Linux/${kver}.efi"
