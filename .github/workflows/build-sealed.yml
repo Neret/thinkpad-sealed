@@ -50,7 +50,7 @@ jobs:
           printf '%s\n' "$PCR_KEY" > "$RUNNER_TEMP/pcr.key"
           printf '%s\n' "$PCR_CERT" > "$RUNNER_TEMP/pcr.crt"
 
-      - name: Build unsealed image (systemd-boot firmato, senza bootupd e dnf5)
+      - name: Build unsealed image
         run: |
           sudo podman build --pull=always \
             -f containers/Containerfile.unsealed \
@@ -59,7 +59,10 @@ jobs:
             --secret "id=cert,src=${RUNNER_TEMP}/mok.crt" \
             .
 
-      - name: Build sealed image (UKI firmata con chiave MOK e policy PCR)
+      - name: Pull TOOLS image
+        run: sudo podman pull quay.io/fedora/fedora-bootc:45
+
+      - name: Build sealed image 
         run: |
           sudo podman build --pull=missing \
             -f containers/Containerfile.seal --target final \
@@ -97,7 +100,7 @@ jobs:
             bootc install to-disk --via-loopback --composefs-backend \
             --bootloader systemd --filesystem ext4 /data/disk.raw
 
-      - name: Push sealed image (tag univoco e tag mobile "sealed")
+      - name: Push sealed image
         run: |
           sudo podman push "${IMAGE}:${TAG}"
           sudo podman tag "${IMAGE}:${TAG}" "${IMAGE}:sealed"
