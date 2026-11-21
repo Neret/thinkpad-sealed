@@ -15,7 +15,7 @@ install:
     - gnome-session-wayland-session
     - gnome-settings-daemon
     - gnome-control-center
-    - gnome-initial-setup
+    # - gnome-initial-setup
     - gnome-keyring
     - gnome-keyring-pam
     - gnome-bluetooth
