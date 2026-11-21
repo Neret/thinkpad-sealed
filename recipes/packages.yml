@@ -56,6 +56,7 @@ install:
     - bluez
     - firewalld
     - systemd-resolved
+    - cracklib-dicts
     # - NetworkManager-cloud-setup
     # - nmstate
     # - nmap
@@ -165,7 +166,7 @@ install:
     # ---------------------------------------------------------
     - podman
     - fuse-overlayfs
-    - toolbox
+    # - toolbox
     - distrobox
     # - buildah
     # - crane
