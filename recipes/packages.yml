@@ -5,8 +5,8 @@ repos:
   cleanup: true
 
 install:
-  packages:
   install-weak-deps: false
+  packages:
     # ---------------------------------------------------------
     # GNOME Desktop — componenti host
     # ---------------------------------------------------------
