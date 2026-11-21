@@ -1,4 +1,5 @@
 ---
+# yaml-language-server: $schema=https://schema.blue-build.org/recipe-v1.json
 version: 1
 name: fedora-bootc-sealed-os
 description: Minimal Fedora bootc GNOME image for the ThinkPad T14s Gen 1 AMD
@@ -21,7 +22,8 @@ modules:
       - assets.sh
     snippets:
       - useradd -D -s /usr/bin/zsh
-      - sed -i "s/grep -q runc/grep -q 'name: runc'/" /usr/bin/distrobox-create
+      - |
+        sed -i "s/grep -q runc/grep -q 'name: runc'/" /usr/bin/distrobox-create
       - ln -sf /usr/lib/systemd/system/graphical.target /etc/systemd/system/default.target
       - chmod 0644 /usr/share/polkit-1/actions/com.bitwarden.Bitwarden.policy
       - chown root:root /usr/share/polkit-1/actions/com.bitwarden.Bitwarden.policy
@@ -37,7 +39,6 @@ modules:
         - power-profiles-daemon.service
         - systemd-boot-update.service
 
- 
   - type: script
     snippets:
       - kver="$(ls -1 /usr/lib/modules | sort -V | tail -n1)" && dracut --force --no-hostonly --add bootc --kver "$kver" "/usr/lib/modules/$kver/initramfs.img"
