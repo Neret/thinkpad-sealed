@@ -1,4 +1,24 @@
 [org.gnome.desktop.interface]
 font-name='Adwaita Sans 12'
 document-font-name='Adwaita Sans 14'
-monospace-font-name='Adwaita Mono 14'
+monospace-font-name='Cascadia Code NF 13'
+color-scheme='prefer-dark'
+icon-theme='Adwaita'
+cursor-theme='Adwaita'
+clock-show-seconds=false
+clock-show-date=true
+
+[org.gnome.desktop.wm.preferences]
+button-layout='appmenu:close'
+
+[org.gnome.mutter]
+edge-tiling=true
+dynamic-workspaces=true
+experimental-features=['scale-monitor-framebuffer']
+
+[org.gnome.desktop.peripherals.touchpad]
+tap-to-click=true
+natural-scroll=true
+two-finger-scrolling-enabled=true
+disable-while-typing=true
+speed=0.0

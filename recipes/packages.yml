@@ -25,6 +25,7 @@ install:
     - gvfs
     - gvfs-mtp
     - gvfs-smb
+    - cascadia-code-nf-fonts
     - plymouth
     - plymouth-theme-spinner
     - udisks2
