@@ -69,7 +69,8 @@ install:
     # ---------------------------------------------------------
     - systemd-boot-unsigned  
     - shim-x64               
-    - mokutil                 
+    - mokutil
+    - cracklib-dicts
     - efibootmgr              
     - cryptsetup           
     - tpm2-tss                
