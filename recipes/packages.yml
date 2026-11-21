@@ -6,6 +6,7 @@ repos:
 
 install:
   packages:
+  install-weak-deps: false
     # ---------------------------------------------------------
     # GNOME Desktop — componenti host
     # ---------------------------------------------------------
