@@ -166,7 +166,7 @@ install:
     # ---------------------------------------------------------
     - podman
     - fuse-overlayfs
-    # - toolbox
+    - toolbox
     - distrobox
     # - buildah
     # - crane

@@ -102,17 +102,24 @@ jobs:
     
       - name: Verify signatures and units
         run: |
+          set -euo pipefail
           sudo apt-get update -qq
           sudo apt-get install -y -qq sbsigntool
           sudo podman run --rm "${IMAGE}:${TAG}" sh -c 'cat /boot/EFI/Linux/*.efi' > "$RUNNER_TEMP/uki.efi"
           sudo podman run --rm "${IMAGE}:${TAG}" cat /usr/lib/systemd/boot/efi/systemd-bootx64.efi > "$RUNNER_TEMP/sdboot.efi"
           sbverify --cert "$RUNNER_TEMP/mok.crt" "$RUNNER_TEMP/uki.efi"
           sbverify --cert "$RUNNER_TEMP/mok.crt" "$RUNNER_TEMP/sdboot.efi"
-          sudo podman run --rm "${IMAGE}:${TAG}" systemctl --root=/ is-enabled systemd-boot-update.service
+          state="$(sudo podman run --rm "${IMAGE}:${TAG}" systemctl --root=/ is-enabled systemd-boot-update.service || true)"
+          echo "systemd-boot-update.service: ${state}"
+          case "${state}" in
+            disabled|masked) ;;
+            *) echo "ERRORE: systemd-boot-update.service non è disabilitato (${state})"; exit 1 ;;
+          esac
           {
             echo "### ${IMAGE}:${TAG}"
             echo "- certificato: $(openssl x509 -in "$RUNNER_TEMP/mok.crt" -noout -fingerprint -sha256)"
             echo "- UKI: $(ls -lh "$RUNNER_TEMP/uki.efi" | awk '{print $5}')"
+            echo "- systemd-boot-update: ${state}"
           } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Rehearsal - bootc install su disco loopback
