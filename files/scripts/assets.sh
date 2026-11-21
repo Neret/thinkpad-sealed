@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+sed -i "s/grep -q runc/grep -q 'name: runc'/" /usr/bin/distrobox-create
 STARSHIP_VER="1.27.0"
 
 tmp="$(mktemp -d)"

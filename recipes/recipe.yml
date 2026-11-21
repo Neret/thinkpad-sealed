@@ -22,8 +22,6 @@ modules:
       - assets.sh
     snippets:
       - useradd -D -s /usr/bin/zsh
-      - |
-        sed -i "s/grep -q runc/grep -q 'name: runc'/" /usr/bin/distrobox-create
       - ln -sf /usr/lib/systemd/system/graphical.target /etc/systemd/system/default.target
       - chmod 0644 /usr/share/polkit-1/actions/com.bitwarden.Bitwarden.policy
       - chown root:root /usr/share/polkit-1/actions/com.bitwarden.Bitwarden.policy
@@ -37,7 +35,6 @@ modules:
         - bluetooth.service
         - firewalld.service
         - power-profiles-daemon.service
-        - systemd-boot-update.service
 
   - type: script
     snippets:
