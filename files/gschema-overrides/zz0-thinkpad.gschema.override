@@ -3,17 +3,12 @@ font-name='Adwaita Sans 12'
 document-font-name='Adwaita Sans 14'
 monospace-font-name='Cascadia Code NF 13'
 color-scheme='prefer-dark'
-icon-theme='Adwaita'
-cursor-theme='Adwaita'
-clock-show-seconds=false
-clock-show-date=true
 
 [org.gnome.desktop.wm.preferences]
 button-layout='appmenu:close'
 
-[org.gnome.mutter]
-edge-tiling=true
-dynamic-workspaces=true
+[org.gnome.desktop.input-sources]
+sources=[('xkb', 'it')]
 
 [org.gnome.desktop.peripherals.touchpad]
 tap-to-click=true

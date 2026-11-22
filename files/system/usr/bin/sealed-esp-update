@@ -1,0 +1,53 @@
+#!/usr/bin/env bash
+# sealed-esp-update - allinea sull'ESP la catena shim -> sd-boot a quella dell'immagine in uso.
+#
+# Completa systemd-boot-update.service (che aggiorna solo EFI/systemd/systemd-bootx64.efi):
+# qui si aggiornano anche shim, mmx64 e la copia di sd-boot usata da shim (grubx64.efi).
+# L'ESP e' su /efi con automount (vedi /etc/fstab): si monta all'accesso e si smonta da sola
+# dopo qualche secondo di inattivita'. Le UKI le gestisce bootc.
+#
+# Uso: sealed-esp-update            # solo confronto
+#      sealed-esp-update --apply    # copia i file diversi (tmp + rename)
+set -euo pipefail
+[[ $EUID -eq 0 ]] || exec sudo "$0" "$@"
+
+ESP="${ESP:-/efi}"
+APPLY=0
+[[ "${1:-}" == "--apply" ]] && APPLY=1
+
+ls "$ESP" >/dev/null 2>&1 || true   # l'accesso fa scattare l'automount
+findmnt -n -t vfat "$ESP" >/dev/null \
+  || { echo "ESP non montata su $ESP (controlla /etc/fstab)" >&2; exit 1; }
+
+shim="$(ls -d /usr/lib/efi/shim/*/EFI 2>/dev/null | sort -V | tail -n1)"
+[[ -n "$shim" ]] || { echo "shim non trovato in /usr/lib/efi/shim" >&2; exit 1; }
+sdboot=/usr/lib/systemd/boot/efi/systemd-bootx64.efi
+
+changed=0
+sync_file() {
+  local src="$1" dst="$ESP/EFI/$2"
+  [[ -s "$src" ]] || { echo "sorgente mancante o vuota: $src" >&2; exit 1; }
+  if [[ -f "$dst" ]] && cmp -s "$src" "$dst"; then
+    echo "invariato:  EFI/$2"
+    return 0
+  fi
+  changed=1
+  if (( APPLY )); then
+    install -m 0755 "$src" "$dst.new"
+    sync
+    mv -f "$dst.new" "$dst"
+    echo "aggiornato: EFI/$2"
+  else
+    echo "DIVERSO:    EFI/$2 (usa --apply)"
+  fi
+}
+
+sync_file "$shim/BOOT/BOOTX64.EFI" BOOT/BOOTX64.EFI
+sync_file "$shim/fedora/mmx64.efi" BOOT/mmx64.efi
+sync_file "$sdboot"                BOOT/grubx64.efi
+sync_file "$sdboot"                systemd/systemd-bootx64.efi
+sync
+
+if (( changed && APPLY )); then
+  echo "ESP aggiornata."
+fi

@@ -28,15 +28,12 @@ jobs:
     steps:
       - uses: actions/checkout@v7.0.1
 
-      - name: Installa sbsigntool
-        run: |
-          sudo apt-get update -qq
-          sudo apt-get install -y -qq sbsigntool
-
       - name: ShellCheck
         run: |
           shellcheck -x -S warning \
-            files/scripts/*.sh
+            install.sh \
+            files/scripts/*.sh \
+            files/system/usr/bin/sealed-*
 
   build:
     name: Build and Push

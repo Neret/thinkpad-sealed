@@ -84,8 +84,13 @@ jobs:
             --build-arg "UNSEALED=localhost/unsealed:${TAG}" \
             --build-arg "KERNEL=localhost/kernel:${TAG}" \
             --build-arg "TOOLS=${TOOLS}" \
+            --build-arg "STRICT_BOOTC=1" \
             --secret "id=key,src=${RUNNER_TEMP}/mok.key" \
             --secret "id=cert,src=${RUNNER_TEMP}/mok.crt" \
+            --label "org.opencontainers.image.revision=${GITHUB_SHA}" \
+            --label "org.opencontainers.image.source=https://github.com/${GITHUB_REPOSITORY}" \
+            --label "org.opencontainers.image.base.name=${BASE%@*}" \
+            --label "org.opencontainers.image.base.digest=${BASE##*@}" \
             -t "${IMAGE}:${TAG}" \
             .
 
@@ -109,11 +114,17 @@ jobs:
           sudo podman run --rm "${IMAGE}:${TAG}" cat /usr/lib/systemd/boot/efi/systemd-bootx64.efi > "$RUNNER_TEMP/sdboot.efi"
           sbverify --cert "$RUNNER_TEMP/mok.crt" "$RUNNER_TEMP/uki.efi"
           sbverify --cert "$RUNNER_TEMP/mok.crt" "$RUNNER_TEMP/sdboot.efi"
+          objcopy -O binary --only-section=.cmdline "$RUNNER_TEMP/uki.efi" "$RUNNER_TEMP/cmdline.txt"
+          echo "cmdline UKI: $(tr -d '\0' < "$RUNNER_TEMP/cmdline.txt")"
+          for want in "composefs=" "rd.luks.options=tpm2-device=auto" "vconsole.keymap=it"; do
+            grep -q -- "${want}" "$RUNNER_TEMP/cmdline.txt" \
+              || { echo "ERRORE: la cmdline della UKI non contiene ${want}"; exit 1; }
+          done
           state="$(sudo podman run --rm "${IMAGE}:${TAG}" systemctl --root=/ is-enabled systemd-boot-update.service || true)"
           echo "systemd-boot-update.service: ${state}"
           case "${state}" in
-            disabled|masked) ;;
-            *) echo "ERRORE: systemd-boot-update.service non è disabilitato (${state})"; exit 1 ;;
+            enabled) ;;
+            *) echo "ERRORE: systemd-boot-update.service non è abilitato (${state})"; exit 1 ;;
           esac
           {
             echo "### ${IMAGE}:${TAG}"

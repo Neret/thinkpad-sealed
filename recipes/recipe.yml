@@ -25,6 +25,9 @@ modules:
       - ln -sf /usr/lib/systemd/system/graphical.target /etc/systemd/system/default.target
       - chmod 0644 /usr/share/polkit-1/actions/com.bitwarden.Bitwarden.policy
       - chown root:root /usr/share/polkit-1/actions/com.bitwarden.Bitwarden.policy
+      - mkdir -p /efi
+      - chmod 0755 /usr/bin/sealed-esp-update
+      - 'authselect enable-feature with-fingerprint || echo "WARN - authselect non configurato, fprintd non attivo in PAM"'
 
   - type: systemd
     system:
@@ -35,10 +38,18 @@ modules:
         - bluetooth.service
         - firewalld.service
         - power-profiles-daemon.service
+        - systemd-boot-update.service
+        - systemd-oomd.service
+        - sealed-bootc-stage.timer
+      disabled:
+        - NetworkManager-wait-online.service
+    user:
+      enabled:
+        - podman.socket
 
   - type: script
     snippets:
-      - kver="$(ls -1 /usr/lib/modules | sort -V | tail -n1)" && dracut --force --no-hostonly --add bootc --kver "$kver" "/usr/lib/modules/$kver/initramfs.img"
+      - kver="$(ls -1 /usr/lib/modules | sort -V | tail -n1)" && dracut --force --reproducible --no-hostonly --omit "nfs iscsi nvmf mdraid dmraid multipath lvm" --add bootc --kver "$kver" "/usr/lib/modules/$kver/initramfs.img"
 
   - from-file: flatpaks.yml
 

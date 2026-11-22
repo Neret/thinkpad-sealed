@@ -2,9 +2,9 @@ kargs = [
   "rw",
   "rd.luks.options=tpm2-device=auto",
   "vconsole.keymap=it",
-  "amd_iommu=on",
-  "iommu=pt",
   "zswap.enabled=0",
+  "slab_nomerge",
+  "vsyscall=none",
   "rhgb",
   "quiet"
 ]

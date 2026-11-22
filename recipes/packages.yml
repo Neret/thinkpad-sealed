@@ -16,7 +16,7 @@ install:
     - gnome-session-wayland-session
     - gnome-settings-daemon
     - gnome-control-center
-    # - gnome-initial-setup
+    - gnome-initial-setup
     - gnome-keyring
     - gnome-keyring-pam
     - gnome-bluetooth
@@ -26,6 +26,8 @@ install:
     - gvfs-mtp
     - gvfs-smb
     - cascadia-code-nf-fonts
+    - adwaita-sans-fonts
+    - google-noto-color-emoji-fonts
     - plymouth
     - plymouth-theme-spinner
     - udisks2
@@ -79,6 +81,8 @@ install:
     - fprintd
     - fprintd-pam
     - zram-generator-defaults
+    - systemd-oomd-defaults
+    - authselect
 
     # Audio, power, and firmware updates
     - pipewire
@@ -125,6 +129,10 @@ install:
     - ncurses
     - sudo
     - nano
+    - less
+    - man-db
+    - rsync
+    - bash-completion
     # - gcc
     # - make
     # - gdb

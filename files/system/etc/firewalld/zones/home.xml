@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<zone>
+  <short>Home</short>
+  <description>Reti fidate: consente solo LocalSend. Assegna con: nmcli connection modify NOME connection.zone home</description>
+  <service name="localsend"/>
+</zone>
