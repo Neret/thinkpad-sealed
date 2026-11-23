@@ -7,7 +7,8 @@ FROM ${SIGNER} AS sign
 RUN dnf install -y sbsigntools && dnf clean all
 RUN --mount=type=bind,from=base,target=/target \
     --mount=type=secret,id=key \
-    --mount=type=secret,id=cert <<'EOF'
+    --mount=type=secret,id=cert \
+    bash -s <<'EOF'
 set -euo pipefail
 src=/target/usr/lib/systemd/boot/efi/systemd-bootx64.efi
 test -f "$src"

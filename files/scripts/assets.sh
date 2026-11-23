@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# distrobox: patch per il rilevamento di runc. Se a monte il codice cambia, il build si ferma.
+
 sed -i "s/grep -q runc/grep -q 'name: runc'/" /usr/bin/distrobox-create
 if ! grep -q "grep -q 'name: runc'" /usr/bin/distrobox-create; then
   echo "::warning::patch distrobox-create non applicata (script cambiato a monte?)"
@@ -9,7 +9,6 @@ if ! grep -q "grep -q 'name: runc'" /usr/bin/distrobox-create; then
 fi
 
 STARSHIP_VER="1.27.0"
-# sha256 del tarball, verificato a mano (non scaricato dalla stessa origine)
 STARSHIP_SHA256="10c8eb4cb3b761d9bf59ea828444c2dab36c900b7d69a69e08814b286969df89"
 
 tmp="$(mktemp -d)"
@@ -21,6 +20,6 @@ curl -fsSL --proto '=https' --tlsv1.2 \
 printf '%s  %s\n' "$STARSHIP_SHA256" "$tmp/starship.tar.gz" | sha256sum -c -
 
 tar -xzf "$tmp/starship.tar.gz" -C "$tmp" starship
-# /usr/bin e non /usr/local: in bootc /usr/local punta a /var e non segue gli aggiornamenti
+
 install -m 0755 "$tmp/starship" /usr/bin/starship
 [[ "$(/usr/bin/starship --version)" == *"$STARSHIP_VER"* ]]
