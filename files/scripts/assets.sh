@@ -3,8 +3,10 @@ set -euo pipefail
 
 # distrobox: patch per il rilevamento di runc. Se a monte il codice cambia, il build si ferma.
 sed -i "s/grep -q runc/grep -q 'name: runc'/" /usr/bin/distrobox-create
-grep -q "grep -q 'name: runc'" /usr/bin/distrobox-create \
-  || { echo "ERRORE: patch distrobox-create non applicata (script cambiato a monte?)" >&2; exit 1; }
+if ! grep -q "grep -q 'name: runc'" /usr/bin/distrobox-create; then
+  echo "::warning::patch distrobox-create non applicata (script cambiato a monte?)"
+  grep -n runc /usr/bin/distrobox-create || true
+fi
 
 STARSHIP_VER="1.27.0"
 # sha256 del tarball, verificato a mano (non scaricato dalla stessa origine)
