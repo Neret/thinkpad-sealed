@@ -5,6 +5,9 @@ kargs = [
   "zswap.enabled=0",
   "slab_nomerge",
   "vsyscall=none",
+  "page_alloc.shuffle=1",
+  "randomize_kstack_offset=on",
+  "lockdown=integrity",
   "rhgb",
   "quiet"
 ]

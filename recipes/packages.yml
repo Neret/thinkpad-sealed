@@ -57,9 +57,16 @@ install:
     - NetworkManager-bluetooth
     - wpa_supplicant
     - openssh-clients
+    - iputils
     - bluez
     - firewalld
     - systemd-resolved
+    - htop
+    - strace
+    - lsof
+    - bind-utils
+    - chrony
+    - iproute
     - cracklib-dicts
     # - NetworkManager-cloud-setup
     # - nmstate
@@ -78,6 +85,7 @@ install:
     - efibootmgr              
     - cryptsetup           
     - tpm2-tss                
+    - tpm2-tools
     - fprintd
     - fprintd-pam
     - zram-generator-defaults

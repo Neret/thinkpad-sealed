@@ -235,6 +235,7 @@ mount "/dev/mapper/$LUKS_NAME" "$MNT"
 mkdir -p "$MNT/boot/efi"
 mount -o fmask=0077,dmask=0077 "$ESP" "$MNT/boot/efi"
 
+set +e
 podman run --rm --privileged --pid=host --security-opt label=disable \
   -v /dev:/dev \
   -v /var/lib/containers:/var/lib/containers \
@@ -270,6 +271,7 @@ podman run --rm --privileged --pid=host --security-opt label=disable \
 
     bootc install to-filesystem \
       --composefs-backend \
+      --target-imgref ghcr.io/neret/fedora-bootc-sealed-os:sealed \
       --bootloader systemd \
       --root-mount-spec="" \
       --skip-finalize \
@@ -277,6 +279,7 @@ podman run --rm --privileged --pid=host --security-opt label=disable \
   ' 2>&1 | tee "$BOOTC_LOG"
 
 rc=${PIPESTATUS[0]}
+set -e
 (( rc == 0 )) || die "bootc install fallito (vedi $BOOTC_LOG)"
 
 mount -o remount,ro "$MNT"
@@ -426,6 +429,7 @@ echo " Immagine: $IMAGE"
 echo " ESP:      $ESP (PARTUUID $ESP_PARTUUID)"
 echo " Voce:     Boot${first} 'Sealed OS'"
 echo
+echo " Controlla con: sudo bootc status (deve mostrare :sealed; se vedi un tag con timestamp: sudo bootc switch ghcr.io/neret/fedora-bootc-sealed-os:sealed)"
 echo " Primo avvio: passphrase LUKS."
 echo " Se compare MokManager: 'Enroll key from disk' -> EFI/BOOT/MOK.cer"
 echo " Dopo il primo avvio (con la MOK gia' registrata) registra il TPM con PIN:"
