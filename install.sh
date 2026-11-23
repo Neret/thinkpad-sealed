@@ -70,10 +70,8 @@ require_signed() {
   if sbverify --list "$1" 2>&1 | grep -q 'No signature table'; then
     die "non firmato: $1"
   fi
-  if [[ -n "$MOK_CRT" ]]; then
-    sbverify --cert "$MOK_CRT" "$1" >/dev/null 2>&1 \
-      || die "firma non valida con $MOK_CRT: $1"
-  fi
+  sbverify --cert "$MOK_CRT" "$1" >/dev/null 2>&1 \
+    || die "firma non valida con $MOK_CRT: $1"
 }
 
 require_signed_shim() {
@@ -86,7 +84,13 @@ require_signed_shim() {
 log "[1/11] Prerequisiti"
 [[ -d /sys/firmware/efi/efivars ]] || die "la live non e' avviata in UEFI"
 dnf install -y --setopt=install_weak_deps=False \
-  podman cryptsetup gdisk dosfstools e2fsprogs efibootmgr sbsigntools mokutil util-linux
+  podman cryptsetup gdisk dosfstools e2fsprogs efibootmgr sbsigntools mokutil util-linux openssl
+
+[[ -r "$MOK_CRT" ]] || die "MOK_CRT obbligatorio e leggibile (certificato PEM con cui sono firmati sd-boot e UKI)"
+[[ -r "$MOK_CER" ]] || die "MOK_CER obbligatorio e leggibile (certificato DER da registrare nel firmware)"
+fp_crt="$(openssl x509 -in "$MOK_CRT" -noout -fingerprint -sha256)"
+fp_cer="$(openssl x509 -inform DER -in "$MOK_CER" -noout -fingerprint -sha256)"
+[[ "$fp_crt" == "$fp_cer" ]] || die "MOK_CRT e MOK_CER non sono lo stesso certificato"
 
 # ---------------- 2. CONFERMA E PASSPHRASE ----------------
 log "[2/11] Conferma"
@@ -210,6 +214,10 @@ done
 
 require_signed "$STAGE/systemd-bootx64.efi"
 require_signed_shim "$STAGE/BOOTX64.EFI"
+
+image_fstab="$(podman run --rm --security-opt label=disable "$IMAGE" cat /etc/fstab)"
+grep -qi "PARTUUID=${ESP_PARTUUID}" <<<"$image_fstab" \
+  || die "ESP_PARTUUID ($ESP_PARTUUID) assente nell'fstab dell'immagine: /efi non si monterebbe"
 
 # ---------------- 6. FILESYSTEM ----------------
 log "[6/11] ESP, LUKS2 e root ext4 (fs-verity)"

@@ -21,10 +21,11 @@ env:
 jobs:
   seal:
     if: github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
+    environment: signing
     timeout-minutes: 120
     steps:
-      - uses: actions/checkout@v7.0.1
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Free disk space
         run: sudo rm -rf /usr/share/dotnet /opt/ghc /usr/local/lib/android /opt/hostedtoolcache
@@ -147,9 +148,27 @@ jobs:
 
       - name: Push sealed image
         run: |
-          sudo podman push "${IMAGE}:${TAG}"
+          set -euo pipefail
+          sudo podman push --digestfile "$RUNNER_TEMP/digest" "${IMAGE}:${TAG}"
           sudo podman tag "${IMAGE}:${TAG}" "${IMAGE}:sealed"
           sudo podman push "${IMAGE}:sealed"
+          echo "DIGEST=$(cat "$RUNNER_TEMP/digest")" >> "$GITHUB_ENV"
+
+      - name: Install cosign
+        uses: sigstore/cosign-installer@398d4b0eeef1380460a10c8013a76f728fb906ac # v3
+        with:
+          cosign-release: "v2.4.3"
+
+      - name: Sign sealed image
+        env:
+          COSIGN_PRIVATE_KEY: ${{ secrets.SIGNING_SECRET }}
+          COSIGN_PASSWORD: ""
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          echo "$GH_TOKEN" | cosign login ghcr.io -u "$GITHUB_ACTOR" --password-stdin
+          cosign sign --yes --key env://COSIGN_PRIVATE_KEY "${IMAGE}@${DIGEST}"
+          cosign verify --key cosign.pub "${IMAGE}@${DIGEST}" >/dev/null
 
       - name: Remove signing keys
         if: always()

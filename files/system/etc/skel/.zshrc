@@ -51,27 +51,6 @@ fi
 (( $+commands[rg] )) && alias rgh='rg --smart-case --hidden --glob "!.git"'
 (( $+commands[xdg-open] )) && alias open='xdg-open >/dev/null'
 
-apue() {
-    if (( $# != 1 )); then
-        print -u2 'uso: apue <file.c>'
-        return 2
-    fi
-
-    local src="$1"
-    local out="${src%.c}"
-
-    gcc -ansi \
-        -I"$HOME/Progetti/apue.3e/include" \
-        -Wall \
-        -DLINUX \
-        -D_GNU_SOURCE \
-        "$src" \
-        -o "$out" \
-        -L"$HOME/Progetti/apue.3e/lib" \
-        -lapue \
-        -pthread
-}
-
 (( $+commands[zoxide] )) && eval "$(zoxide init zsh)"
 (( $+commands[fzf] )) && source <(fzf --zsh)
 (( $+commands[mise] )) && eval "$(mise activate zsh)"

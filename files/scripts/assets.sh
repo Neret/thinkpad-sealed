@@ -1,17 +1,24 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+# distrobox: patch per il rilevamento di runc. Se a monte il codice cambia, il build si ferma.
 sed -i "s/grep -q runc/grep -q 'name: runc'/" /usr/bin/distrobox-create
+grep -q "grep -q 'name: runc'" /usr/bin/distrobox-create \
+  || { echo "ERRORE: patch distrobox-create non applicata (script cambiato a monte?)" >&2; exit 1; }
+
 STARSHIP_VER="1.27.0"
+# sha256 del tarball, verificato a mano (non scaricato dalla stessa origine)
+STARSHIP_SHA256="10c8eb4cb3b761d9bf59ea828444c2dab36c900b7d69a69e08814b286969df89"
 
 tmp="$(mktemp -d)"
 trap 'rm -rf "$tmp"' EXIT
 
-base="https://github.com/starship/starship/releases/download/v${STARSHIP_VER}"
+curl -fsSL --proto '=https' --tlsv1.2 \
+  "https://github.com/starship/starship/releases/download/v${STARSHIP_VER}/starship-x86_64-unknown-linux-musl.tar.gz" \
+  -o "$tmp/starship.tar.gz"
+printf '%s  %s\n' "$STARSHIP_SHA256" "$tmp/starship.tar.gz" | sha256sum -c -
 
-curl -fsSL "$base/starship-x86_64-unknown-linux-musl.tar.gz" -o "$tmp/starship.tar.gz"
-curl -fsSL "$base/starship-x86_64-unknown-linux-musl.tar.gz.sha256" -o "$tmp/starship.sha256"
-
-starship_checksum="$(awk 'NR == 1 { print $1 }' "$tmp/starship.sha256")"
-printf '%s  %s\n' "$starship_checksum" "$tmp/starship.tar.gz" | sha256sum -c -
-tar -xzf "$tmp/starship.tar.gz" -C /usr/local/bin
+tar -xzf "$tmp/starship.tar.gz" -C "$tmp" starship
+# /usr/bin e non /usr/local: in bootc /usr/local punta a /var e non segue gli aggiornamenti
+install -m 0755 "$tmp/starship" /usr/bin/starship
+[[ "$(/usr/bin/starship --version)" == *"$STARSHIP_VER"* ]]

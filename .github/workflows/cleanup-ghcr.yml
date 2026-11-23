@@ -1,0 +1,30 @@
+name: Cleanup GHCR
+
+on:
+  schedule:
+    - cron: "0 5 1 * *"
+  workflow_dispatch:
+
+permissions:
+  packages: write
+
+jobs:
+  prune:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - name: Prune OS image versions
+        uses: actions/delete-package-versions@e5bc658cc4c965c472efe991f8beea3981499c55 # v5
+        with:
+          package-name: fedora-bootc-sealed-os
+          package-type: container
+          min-versions-to-keep: 30
+          delete-only-untagged-versions: false
+
+      - name: Prune base image versions
+        uses: actions/delete-package-versions@e5bc658cc4c965c472efe991f8beea3981499c55 # v5
+        with:
+          package-name: fedora-bootc-sealed-os-minimal-base
+          package-type: container
+          min-versions-to-keep: 5
+          delete-only-untagged-versions: true

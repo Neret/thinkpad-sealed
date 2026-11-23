@@ -10,7 +10,6 @@ export VISUAL="$EDITOR"
 if command -v podman >/dev/null 2>&1 && [ -n "$XDG_RUNTIME_DIR" ]; then
     export DOCKER_HOST="unix://$XDG_RUNTIME_DIR/podman/podman.sock"
 fi
-export OLLAMA_API_BASE='http://127.0.0.1:11434'
 
 [[ $- != *i* ]] && return
 

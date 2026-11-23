@@ -21,12 +21,12 @@ concurrency:
 jobs:
   test:
     name: Lint e test degli script
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 10
     permissions:
       contents: read
     steps:
-      - uses: actions/checkout@v7.0.1
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: ShellCheck
         run: |
@@ -40,28 +40,29 @@ jobs:
     needs: test
     # rpm-ostree's bubblewrapped systemd-sysusers fails to read /etc/gshadow on Ubuntu 26.04.
     runs-on: ubuntu-24.04
+    environment: signing
     timeout-minutes: 60
     permissions:
       contents: read
       packages: write
 
     steps:
-      - uses: actions/checkout@v7.0.1
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Set up Buildx
-        uses: docker/setup-buildx-action@v4.4.1
+        uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
         with:
           buildkitd-flags: --allow-insecure-entitlement security.insecure
 
       - name: Log in to GitHub Container Registry
-        uses: docker/login-action@v4.8.0
+        uses: docker/login-action@8aa5831fb8d48d8f76594c7ddde61ae58019f550 # v4.8.0
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ github.token }}
 
       - name: Build and publish Fedora Minimal bootc base
-        uses: docker/build-push-action@v7.4.0
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
         with:
           context: .
           file: containers/Containerfile.base
@@ -70,7 +71,7 @@ jobs:
           allow: security.insecure
 
       - name: Build Custom Image
-        uses: blue-build/github-action@v1.14.0
+        uses: blue-build/github-action@fb86c457fd3d0e13d5e9c1875c6305cf28b09234 # v1.14.0
         with:
           recipe: recipe.yml
           cosign_private_key: ${{ secrets.SIGNING_SECRET }}

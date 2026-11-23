@@ -1,0 +1,27 @@
+name: Lint
+
+on:
+  push:
+    paths:
+      - "install.sh"
+      - "files/scripts/**"
+      - "files/system/usr/bin/**"
+      - ".github/workflows/lint.yml"
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  shellcheck:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: ShellCheck
+        run: |
+          shellcheck -x -S warning \
+            install.sh \
+            files/scripts/*.sh \
+            files/system/usr/bin/sealed-*

@@ -27,6 +27,8 @@ modules:
       - chown root:root /usr/share/polkit-1/actions/com.bitwarden.Bitwarden.policy
       - mkdir -p /efi
       - chmod 0755 /usr/bin/sealed-esp-update
+      - grep -q '^sourcedir /etc/chrony.d' /etc/chrony.conf
+      - sed -i 's/^pool /#pool /' /etc/chrony.conf
       - 'authselect enable-feature with-fingerprint || echo "WARN - authselect non configurato, fprintd non attivo in PAM"'
 
   - type: systemd
