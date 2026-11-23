@@ -1,6 +1,7 @@
 kargs = [
   "rw",
   "rd.luks.options=tpm2-device=auto",
+  "rd.driver.pre=amdgpu",
   "vconsole.keymap=it",
   "zswap.enabled=0",
   "slab_nomerge",

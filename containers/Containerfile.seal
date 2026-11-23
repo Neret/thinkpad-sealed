@@ -43,6 +43,7 @@ for pat in bootc-root-setup.service systemd-cryptsetup libtss2 plymouth; do
     missing=1
   fi
 done
+for pat in amdgpu AuthenticAMD; do grep -q "${pat}" "${lst}" || echo "::warning::initramfs senza ${pat}"; done
 [ "${missing}" -eq 0 ] || exit 1
 
 stub="/target/usr/lib/systemd/boot/efi/linuxx64.efi.stub"
