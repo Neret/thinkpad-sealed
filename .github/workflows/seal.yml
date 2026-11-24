@@ -2,10 +2,7 @@ name: Build Sealed Image
 
 on:
   workflow_dispatch:
-  workflow_run:
-    workflows: ["Build Custom OS"]
-    types: [completed]
-    branches: [main]
+  workflow_call:
 
 permissions:
   contents: read
@@ -20,7 +17,6 @@ env:
 
 jobs:
   seal:
-    if: github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success'
     runs-on: ubuntu-24.04
     environment: signing
     timeout-minutes: 120
@@ -175,3 +171,8 @@ jobs:
       - name: Remove signing keys
         if: always()
         run: shred -u "$RUNNER_TEMP/mok.key" "$RUNNER_TEMP/mok.crt" || true
+
+      - name: Verify published tag
+        run: |
+          set -euo pipefail
+          cosign verify --key cosign.pub "${IMAGE}:sealed" >/dev/null

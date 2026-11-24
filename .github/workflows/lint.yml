@@ -8,6 +8,7 @@ on:
       - "install.sh"
       - ".github/workflows/lint.yml"
   pull_request:
+  workflow_call:
   workflow_dispatch:
 
 permissions:

@@ -12,6 +12,8 @@ on:
       - "files/**"
       - "cosign.pub"
       - ".github/workflows/build.yml"
+      - ".github/workflows/seal.yml"
+      - ".github/workflows/lint.yml"
   workflow_dispatch:
 
 concurrency:
@@ -19,26 +21,15 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  test:
-    name: Lint e test degli script
-    runs-on: ubuntu-24.04
-    timeout-minutes: 10
+  lint:
+    name: Lint
     permissions:
       contents: read
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-
-      - name: ShellCheck
-        run: |
-          shellcheck -x -S warning \
-            install.sh \
-            containers/scripts/*.sh \
-            files/scripts/*.sh \
-            files/system/usr/bin/sealed-*
+    uses: ./.github/workflows/lint.yml
 
   build:
-    name: Build and Push
-    needs: test
+    name: Base e immagine
+    needs: lint
     # rpm-ostree's bubblewrapped systemd-sysusers fails to read /etc/gshadow on Ubuntu 26.04.
     runs-on: ubuntu-24.04
     environment: signing
@@ -78,3 +69,12 @@ jobs:
           cosign_private_key: ${{ secrets.SIGNING_SECRET }}
           registry_token: ${{ github.token }}
           pr_event_number: ${{ github.event.number }}
+
+  seal:
+    name: Seal e firma
+    needs: build
+    permissions:
+      contents: read
+      packages: write
+    uses: ./.github/workflows/seal.yml
+    secrets: inherit
