@@ -144,12 +144,10 @@ jobs:
             bootc install to-disk --via-loopback --composefs-backend \
             --bootloader systemd --filesystem ext4 /data/disk.raw
 
-      - name: Push sealed image
+      - name: Push sealed image (tag con timestamp)
         run: |
           set -euo pipefail
           sudo podman push --digestfile "$RUNNER_TEMP/digest" "${IMAGE}:${TAG}"
-          sudo podman tag "${IMAGE}:${TAG}" "${IMAGE}:sealed"
-          sudo podman push "${IMAGE}:sealed"
           echo "DIGEST=$(cat "$RUNNER_TEMP/digest")" >> "$GITHUB_ENV"
 
       - name: Install cosign
@@ -167,6 +165,12 @@ jobs:
           echo "$GH_TOKEN" | cosign login ghcr.io -u "$GITHUB_ACTOR" --password-stdin
           cosign sign --yes --key env://COSIGN_PRIVATE_KEY "${IMAGE}@${DIGEST}"
           cosign verify --key cosign.pub "${IMAGE}@${DIGEST}" >/dev/null
+
+      - name: Publish sealed tag
+        run: |
+          set -euo pipefail
+          sudo podman tag "${IMAGE}:${TAG}" "${IMAGE}:sealed"
+          sudo podman push "${IMAGE}:sealed"
 
       - name: Remove signing keys
         if: always()

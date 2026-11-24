@@ -55,3 +55,9 @@ modules:
   - from-file: flatpaks.yml
 
   - type: signing
+
+  - type: script
+    snippets:
+      - sed -i 's|ghcr.io/Neret/|ghcr.io/neret/|g' /etc/containers/policy.json /etc/containers/registries.d/*.yaml
+      - grep -q 'ghcr.io/neret/fedora-bootc-sealed-os' /etc/containers/policy.json
+      - grep -q 'ghcr.io/neret/fedora-bootc-sealed-os' /etc/containers/registries.d/*.yaml

@@ -61,7 +61,7 @@ install:
     - bluez
     - firewalld
     - systemd-resolved
-    - htop
+    - btop
     - strace
     - lsof
     - bind-utils

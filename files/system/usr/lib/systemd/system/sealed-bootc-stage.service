@@ -1,6 +1,5 @@
 [Unit]
 Description=Prepara la prossima immagine (bootc upgrade, senza riavvio)
-ConditionPathExists=/run/ostree-booted
 ConditionACPower=true
 
 [Service]
