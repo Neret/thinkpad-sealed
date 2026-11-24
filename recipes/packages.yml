@@ -141,6 +141,7 @@ install:
     - man-db
     - rsync
     - bash-completion
+    - unzip
     # - gcc
     # - make
     # - gdb
