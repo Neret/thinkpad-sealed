@@ -32,6 +32,7 @@ jobs:
         run: |
           shellcheck -x -S warning \
             install.sh \
+            containers/scripts/*.sh \
             files/scripts/*.sh \
             files/system/usr/bin/sealed-*
 

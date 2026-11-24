@@ -305,7 +305,7 @@ install -m 0755 "$STAGE/systemd-bootx64.efi" "$E/systemd/systemd-bootx64.efi"
 
 rm -f "$E/BOOT/fbx64.efi" "$E/BOOT/BOOTX64.CSV"
 
-[[ -n "$MOK_CER" ]] && install -m 0644 "$MOK_CER" "$E/BOOT/MOK.cer"
+install -m 0644 "$MOK_CER" "$E/BOOT/MOK.cer"
 sync
 
 # ---------------- 9. VERIFICHE ----------------
@@ -426,6 +426,7 @@ else
   warn "Per riassorbire lo spazio dopo il primo avvio: elimina la partizione 3, estendi la 2,"
   warn "poi: cryptsetup resize <mapper> && resize2fs <mapper>"
   warn "Tabella GPT di backup: $GPT_BACKUP"
+  warn "Per i comandi manuali serve la passphrase LUKS: il keyfile temporaneo viene rimosso a fine script."
 fi
 
 sync

@@ -5,18 +5,11 @@ FROM ${BASE} AS base
 
 FROM ${SIGNER} AS sign
 RUN dnf install -y sbsigntools && dnf clean all
+COPY containers/scripts/sign-sdboot.sh /usr/libexec/sign-sdboot.sh
 RUN --mount=type=bind,from=base,target=/target \
     --mount=type=secret,id=key \
     --mount=type=secret,id=cert \
-    bash -s <<'EOF'
-set -euo pipefail
-src=/target/usr/lib/systemd/boot/efi/systemd-bootx64.efi
-test -f "$src"
-mkdir -p /out
-sbsign --key /run/secrets/key --cert /run/secrets/cert \
-  --output /out/systemd-bootx64.efi "$src"
-sbverify --cert /run/secrets/cert /out/systemd-bootx64.efi
-EOF
+    bash /usr/libexec/sign-sdboot.sh
 
 FROM base AS builder
 COPY --from=sign /out/systemd-bootx64.efi /usr/lib/systemd/boot/efi/systemd-bootx64.efi

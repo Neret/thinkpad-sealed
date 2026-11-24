@@ -104,8 +104,6 @@ jobs:
             done
           } >> "$GITHUB_STEP_SUMMARY"
 
-
-    
       - name: Verify signatures and units
         run: |
           set -euo pipefail

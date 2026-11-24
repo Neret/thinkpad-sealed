@@ -79,12 +79,12 @@ install:
     # ---------------------------------------------------------
     # Boot, sicurezza e storage
     # ---------------------------------------------------------
-    - systemd-boot-unsigned  
-    - shim-x64               
-    - mokutil                 
-    - efibootmgr              
-    - cryptsetup           
-    - tpm2-tss                
+    - systemd-boot-unsigned
+    - shim-x64
+    - mokutil
+    - efibootmgr
+    - cryptsetup
+    - tpm2-tss
     - tpm2-tools
     - fprintd
     - fprintd-pam

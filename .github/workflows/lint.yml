@@ -2,10 +2,10 @@ name: Lint
 
 on:
   push:
+    branches:
+      - main
     paths:
       - "install.sh"
-      - "files/scripts/**"
-      - "files/system/usr/bin/**"
       - ".github/workflows/lint.yml"
   pull_request:
   workflow_dispatch:
@@ -23,5 +23,6 @@ jobs:
         run: |
           shellcheck -x -S warning \
             install.sh \
+            containers/scripts/*.sh \
             files/scripts/*.sh \
             files/system/usr/bin/sealed-*
