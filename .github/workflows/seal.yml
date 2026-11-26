@@ -91,7 +91,7 @@ jobs:
           set -euo pipefail
           config="$(sudo podman inspect "localhost/unsealed:${TAG}")"
           sudo podman run --rm --network none --security-opt label=disable \
-            --mount "type=image,src=localhost/unsealed:${TAG},dest=/chunkah" \
+            --mount "type=image,src=localhost/unsealed:${TAG},destination=/chunkah" \
             -e CHUNKAH_CONFIG_STR="${config}" \
             "${CHUNKAH}" build --max-layers 64 -t "localhost/chunked:${TAG}" \
             | sudo podman load
@@ -148,7 +148,7 @@ jobs:
           set -euo pipefail
           config="$(sudo podman inspect "localhost/unsealed:${TAG}")"
           sudo podman run --rm --network none --security-opt label=disable \
-            --mount "type=image,src=localhost/unsealed:${TAG},dest=/chunkah" \
+            --mount "type=image,src=localhost/unsealed:${TAG},destination=/chunkah" \
             -e CHUNKAH_CONFIG_STR="${config}" \
             "${CHUNKAH}" build --max-layers 64 -t "localhost/chunked:${TAG}" \
             | sudo podman load
