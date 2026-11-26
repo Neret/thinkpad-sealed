@@ -18,7 +18,7 @@ on:
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: false
 
 jobs:
   lint:
@@ -59,6 +59,7 @@ jobs:
           context: .
           file: containers/Containerfile.base
           push: true
+          provenance: false
           tags: ghcr.io/neret/fedora-bootc-sealed-os-minimal-base:45
           allow: security.insecure
 
@@ -68,7 +69,6 @@ jobs:
           recipe: recipe.yml
           cosign_private_key: ${{ secrets.SIGNING_SECRET }}
           registry_token: ${{ github.token }}
-          pr_event_number: ${{ github.event.number }}
 
   seal:
     name: Seal e firma

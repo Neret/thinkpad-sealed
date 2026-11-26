@@ -1,4 +1,4 @@
-# syntax=docker/dockerfile:1-labs
+# syntax=docker/dockerfile:1-labs@sha256:36366b12c1dffb228bb25e9feffb73707b93388f084f4927d2b7686dba29e76a
 FROM quay.io/fedora/fedora-bootc:45 AS builder
 
 RUN --security=insecure /usr/libexec/bootc-base-imagectl build-rootfs \

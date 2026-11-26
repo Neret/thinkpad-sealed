@@ -1,5 +1,4 @@
-# syntax=docker/dockerfile:1
-ARG UNSEALED=ghcr.io/neret/fedora-bootc-sealed-os:unsealed-latest
+ARG UNSEALED=localhost/unsealed:latest
 ARG KERNEL=localhost/kernel:latest
 ARG TOOLS=quay.io/fedora/fedora-bootc:45
 

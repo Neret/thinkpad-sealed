@@ -74,7 +74,6 @@ install:
     # - iperf3
     # - mtr
     # - traceroute
-    # - bind-utils
 
     # ---------------------------------------------------------
     # Boot, sicurezza e storage
@@ -100,6 +99,8 @@ install:
     - upower
     - power-profiles-daemon
     - fwupd
+    - fwupd-efi
+    - wireless-regdb
 
     # ---------------------------------------------------------
     # Firmware e hardware ThinkPad T14s Gen 1 AMD
