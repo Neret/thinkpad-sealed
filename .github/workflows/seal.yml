@@ -14,6 +14,7 @@ concurrency:
 
 env:
   IMAGE: ghcr.io/neret/fedora-bootc-sealed-os
+  CHUNKAH: quay.io/coreos/chunkah@sha256:71e593421c5de7dcc7c8c5c50e98d3bac572055a76f399f61a491d123c20a523
 
 jobs:
   seal:
@@ -85,11 +86,21 @@ jobs:
               .
           done
 
+      - name: Chunk unsealed image
+        run: |
+          set -euo pipefail
+          config="$(sudo podman inspect "localhost/unsealed:${TAG}")"
+          sudo podman run --rm --network none --security-opt label=disable \
+            --mount "type=image,src=localhost/unsealed:${TAG},dest=/chunkah" \
+            -e CHUNKAH_CONFIG_STR="${config}" \
+            "${CHUNKAH}" build --max-layers 64 -t "localhost/chunked:${TAG}" \
+            | sudo podman load
+
       - name: Build sealed image
         run: |
           sudo podman build --pull=missing \
             -f containers/Containerfile.seal --target final \
-            --build-arg "UNSEALED=localhost/unsealed:${TAG}" \
+            --build-arg "UNSEALED=localhost/chunked:${TAG}" \
             --build-arg "KERNEL=localhost/kernel:${TAG}" \
             --build-arg "TOOLS=${TOOLS}" \
             --build-arg "STRICT_BOOTC=1" \
@@ -110,6 +121,7 @@ jobs:
         run: |
           {
             echo "### Dimensioni"
+            echo "- layer: $(sudo podman image inspect --format "{{len .RootFS.Layers}}" "${IMAGE}:${TAG}")"
             for img in "localhost/unsealed:${TAG}" "${IMAGE}:${TAG}"; do
               echo "- ${img}: $(sudo podman image inspect --format '{{.Size}}' "${img}" | numfmt --to=iec)"
             done
@@ -130,6 +142,16 @@ jobs:
             grep -q -- "${want}" "$RUNNER_TEMP/cmdline.txt" \
               || { echo "ERRORE: la cmdline della UKI non contiene ${want}"; exit 1; }
           done
+
+      - name: Chunk unsealed image
+        run: |
+          set -euo pipefail
+          config="$(sudo podman inspect "localhost/unsealed:${TAG}")"
+          sudo podman run --rm --network none --security-opt label=disable \
+            --mount "type=image,src=localhost/unsealed:${TAG},dest=/chunkah" \
+            -e CHUNKAH_CONFIG_STR="${config}" \
+            "${CHUNKAH}" build --max-layers 64 -t "localhost/chunked:${TAG}" \
+            | sudo podman load
           state="$(sudo podman run --rm "${IMAGE}:${TAG}" systemctl --root=/ is-enabled systemd-boot-update.service || true)"
           echo "systemd-boot-update.service: ${state}"
           case "${state}" in
