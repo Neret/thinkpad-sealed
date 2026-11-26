@@ -34,6 +34,16 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: echo "$GH_TOKEN" | sudo podman login ghcr.io -u "$GITHUB_ACTOR" --password-stdin
 
+      - name: Install cosign
+        uses: sigstore/cosign-installer@398d4b0eeef1380460a10c8013a76f728fb906ac # v3
+        with:
+          cosign-release: "v2.4.3"
+
+      - name: Login cosign
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: echo "$GH_TOKEN" | cosign login ghcr.io -u "$GITHUB_ACTOR" --password-stdin
+
       - name: Resolve pinned input images
         run: |
           set -euo pipefail
@@ -42,6 +52,7 @@ jobs:
           tools_digest="$(sudo podman image inspect --format '{{.Digest}}' quay.io/fedora/fedora-bootc:45)"
           base_digest="$(sudo podman image inspect --format '{{.Digest}}' "${IMAGE}:latest")"
           test -n "${tools_digest}" && test -n "${base_digest}"
+          cosign verify --key cosign.pub "${IMAGE}@${base_digest}" >/dev/null
           {
             echo "TOOLS=quay.io/fedora/fedora-bootc:45@${tools_digest}"
             echo "BASE=${IMAGE}@${base_digest}"
@@ -90,6 +101,10 @@ jobs:
             --label "org.opencontainers.image.base.digest=${BASE##*@}" \
             -t "${IMAGE}:${TAG}" \
             .
+
+      - name: Remove Secure Boot private key
+        if: always()
+        run: shred -u "$RUNNER_TEMP/mok.key" || true
 
       - name: Report sizes
         run: |
@@ -146,10 +161,6 @@ jobs:
           sudo podman push --digestfile "$RUNNER_TEMP/digest" "${IMAGE}:${TAG}"
           echo "DIGEST=$(cat "$RUNNER_TEMP/digest")" >> "$GITHUB_ENV"
 
-      - name: Install cosign
-        uses: sigstore/cosign-installer@398d4b0eeef1380460a10c8013a76f728fb906ac # v3
-        with:
-          cosign-release: "v2.4.3"
 
       - name: Sign sealed image
         env:
@@ -158,15 +169,13 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -euo pipefail
-          echo "$GH_TOKEN" | cosign login ghcr.io -u "$GITHUB_ACTOR" --password-stdin
           cosign sign --yes --key env://COSIGN_PRIVATE_KEY "${IMAGE}@${DIGEST}"
           cosign verify --key cosign.pub "${IMAGE}@${DIGEST}" >/dev/null
 
       - name: Publish sealed tag
         run: |
           set -euo pipefail
-          sudo podman tag "${IMAGE}:${TAG}" "${IMAGE}:sealed"
-          sudo podman push "${IMAGE}:sealed"
+          sudo skopeo copy --preserve-digests "docker://${IMAGE}@${DIGEST}" "docker://${IMAGE}:sealed"
 
       - name: Remove signing keys
         if: always()
@@ -176,3 +185,5 @@ jobs:
         run: |
           set -euo pipefail
           cosign verify --key cosign.pub "${IMAGE}:sealed" >/dev/null
+          published="$(sudo skopeo inspect --format "{{.Digest}}" "docker://${IMAGE}:sealed")"
+          test "${published}" = "${DIGEST}"

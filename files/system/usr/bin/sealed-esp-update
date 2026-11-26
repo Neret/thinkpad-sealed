@@ -2,18 +2,28 @@
 # sealed-esp-update - allinea sull'ESP la catena shim -> sd-boot a quella dell'immagine in uso.
 #
 # Completa systemd-boot-update.service (che aggiorna solo EFI/systemd/systemd-bootx64.efi):
-# qui si aggiornano anche shim, mmx64 e la copia di sd-boot usata da shim (grubx64.efi).
+# qui si aggiorna anche la copia di sd-boot usata da shim (grubx64.efi) e, solo su
+# richiesta esplicita, shim e mmx64.
 # L'ESP e' su /efi con automount (vedi /etc/fstab): si monta all'accesso e si smonta da sola
 # dopo qualche secondo di inattivita'. Le UKI le gestisce bootc.
 #
-# Uso: sealed-esp-update            # solo confronto
-#      sealed-esp-update --apply    # copia i file diversi (tmp + rename)
+# Uso: sealed-esp-update                   # solo confronto
+#      sealed-esp-update --apply           # aggiorna solo sd-boot
+#      sealed-esp-update --apply --shim    # aggiorna anche shim e mmx64
 set -euo pipefail
 [[ $EUID -eq 0 ]] || exec sudo "$0" "$@"
 
 ESP="${ESP:-/efi}"
 APPLY=0
-[[ "${1:-}" == "--apply" ]] && APPLY=1
+SHIM=0
+for arg in "$@"; do
+  case "$arg" in
+    --apply) APPLY=1 ;;
+    --shim)  SHIM=1 ;;
+    *) echo "opzione sconosciuta: $arg" >&2; exit 2 ;;
+  esac
+done
+SHIM_APPLY=$(( APPLY && SHIM ))
 
 ls "$ESP" >/dev/null 2>&1 || true   # l'accesso fa scattare l'automount
 findmnt -n -t vfat "$ESP" >/dev/null \
@@ -25,29 +35,30 @@ sdboot=/usr/lib/systemd/boot/efi/systemd-bootx64.efi
 
 changed=0
 sync_file() {
-  local src="$1" dst="$ESP/EFI/$2"
+  local src="$1" dst="$ESP/EFI/$2" apply="${3:-$APPLY}"
   [[ -s "$src" ]] || { echo "sorgente mancante o vuota: $src" >&2; exit 1; }
   if [[ -f "$dst" ]] && cmp -s "$src" "$dst"; then
     echo "invariato:  EFI/$2"
     return 0
   fi
-  changed=1
-  if (( APPLY )); then
+  if (( apply )); then
+    if [[ -f "$dst" ]]; then cp -f "$dst" "$dst.bak"; fi
     install -m 0755 "$src" "$dst.new"
     sync
     mv -f "$dst.new" "$dst"
+    changed=1
     echo "aggiornato: EFI/$2"
   else
-    echo "DIVERSO:    EFI/$2 (usa --apply)"
+    echo "DIVERSO:    EFI/$2 (sd-boot: --apply; shim/mmx64: --apply --shim)"
   fi
 }
 
-sync_file "$shim/BOOT/BOOTX64.EFI" BOOT/BOOTX64.EFI
-sync_file "$shim/fedora/mmx64.efi" BOOT/mmx64.efi
+sync_file "$shim/BOOT/BOOTX64.EFI" BOOT/BOOTX64.EFI "$SHIM_APPLY"
+sync_file "$shim/fedora/mmx64.efi" BOOT/mmx64.efi   "$SHIM_APPLY"
 sync_file "$sdboot"                BOOT/grubx64.efi
 sync_file "$sdboot"                systemd/systemd-bootx64.efi
 sync
 
-if (( changed && APPLY )); then
+if (( changed )); then
   echo "ESP aggiornata."
 fi

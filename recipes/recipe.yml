@@ -47,6 +47,7 @@ modules:
     user:
       enabled:
         - podman.socket
+        - sealed-flatpak-update.timer
 
   - type: script
     snippets:

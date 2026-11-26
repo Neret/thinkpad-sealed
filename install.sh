@@ -4,6 +4,8 @@
 # Usa una partizione SCRATCH temporanea a fine disco (non la RAM) per lo storage
 # di podman. A fine installazione la elimina e la riassorbe nella root.
 #
+# Serve cosign.pub accanto allo script (oppure COSIGN_PUB=/percorso).
+#
 # Uso, con la chiavetta contenente MOK.cer (DER) e MOK.crt (PEM) montata:
 #   MOK_CER=/run/media/liveuser/USB/MOK.cer \
 #   MOK_CRT=/run/media/liveuser/USB/MOK.crt \
@@ -13,11 +15,12 @@ set -euo pipefail
 
 # ---------------- CONFIGURAZIONE ----------------
 DISK="${DISK:-/dev/nvme0n1}"
-IMAGE="${IMAGE:-ghcr.io/neret/fedora-bootc-sealed-os:sealed-20261120230534-918b0b1}"
+IMAGE="${IMAGE:-ghcr.io/neret/fedora-bootc-sealed-os:sealed}"
 ESP_PARTUUID="${ESP_PARTUUID:-210ebd50-ef82-4686-8cea-81d42a396772}"
 SCRATCH_SIZE="${SCRATCH_SIZE:-64G}"
 MOK_CER="${MOK_CER:-}"
 MOK_CRT="${MOK_CRT:-}"
+COSIGN_PUB="${COSIGN_PUB:-$(dirname "$(readlink -f "$0")")/cosign.pub}"
 ASSUME_YES="${ASSUME_YES:-0}"
 
 LUKS_NAME="cryptroot"
@@ -83,14 +86,27 @@ require_signed_shim() {
 # ---------------- 1. PREREQUISITI ----------------
 log "[1/11] Prerequisiti"
 [[ -d /sys/firmware/efi/efivars ]] || die "la live non e' avviata in UEFI"
+grep -qw rd.live.image /proc/cmdline || die "eseguire solo da una live Fedora"
 dnf install -y --setopt=install_weak_deps=False \
-  podman cryptsetup gdisk dosfstools e2fsprogs efibootmgr sbsigntools mokutil util-linux openssl
+  podman cryptsetup gdisk dosfstools e2fsprogs efibootmgr sbsigntools mokutil util-linux openssl skopeo cosign
 
 [[ -r "$MOK_CRT" ]] || die "MOK_CRT obbligatorio e leggibile (certificato PEM con cui sono firmati sd-boot e UKI)"
 [[ -r "$MOK_CER" ]] || die "MOK_CER obbligatorio e leggibile (certificato DER da registrare nel firmware)"
 fp_crt="$(openssl x509 -in "$MOK_CRT" -noout -fingerprint -sha256)"
 fp_cer="$(openssl x509 -inform DER -in "$MOK_CER" -noout -fingerprint -sha256)"
 [[ "$fp_crt" == "$fp_cer" ]] || die "MOK_CRT e MOK_CER non sono lo stesso certificato"
+
+# Risolve il digest e verifica la firma PRIMA di toccare il disco.
+[[ -r "$COSIGN_PUB" ]] || die "cosign.pub non leggibile: $COSIGN_PUB"
+repo="${IMAGE%@*}"
+[[ "${repo##*/}" == *:* ]] && repo="${repo%:*}"
+if [[ "$IMAGE" == *@* ]]; then
+  digest="${IMAGE##*@}"
+else
+  digest="$(skopeo inspect --format '{{.Digest}}' "docker://$IMAGE")" || die "digest non risolto: $IMAGE"
+fi
+IMAGE="${repo}@${digest}"
+cosign verify --key "$COSIGN_PUB" "$IMAGE" >/dev/null || die "verifica cosign fallita: $IMAGE"
 
 # ---------------- 2. CONFERMA E PASSPHRASE ----------------
 log "[2/11] Conferma"
@@ -262,20 +278,6 @@ podman run --rm --privileged --pid=host --security-opt label=disable \
     export TMP=/var/tmp
     export CONTAINER_TMPDIR=/var/tmp
 
-    echo "==> Storage info nel container:"
-    podman info --format "GraphRoot={{ .Store.GraphRoot }}" || true
-    podman info --format "RunRoot={{ .Store.RunRoot }}" || true
-
-    echo "==> Verifica scrittura su /var/tmp:"
-    dd if=/dev/zero of=/var/tmp/.write-test bs=1M count=1024 status=none
-    rm -f /var/tmp/.write-test
-    echo "OK: /var/tmp e'\'' scrivibile ed e'\'' sulla scratch."
-
-    echo "==> Spazio disponibile:"
-    df -h /var/tmp /scratch /var/lib/containers
-
-    echo "==> Mount rilevanti:"
-    mount | grep -E "var/tmp|/scratch|var/lib/containers" || true
 
     bootc install to-filesystem \
       --composefs-backend \

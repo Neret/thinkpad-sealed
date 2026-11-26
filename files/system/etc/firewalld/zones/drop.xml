@@ -2,4 +2,5 @@
 <zone target="DROP">
   <short>Drop</short>
   <description>Scarta tutto il traffico in ingresso.</description>
+  <service name="dhcpv6-client"/>
 </zone>

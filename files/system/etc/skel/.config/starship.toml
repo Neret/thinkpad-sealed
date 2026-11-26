@@ -12,7 +12,7 @@ $os\
 [](fg:#313244 bg:#1e1e2e)\
 [$git_branch$git_status](bg:#1e1e2e fg:#f9e2af)\
 [$c$cpp$rust$golang$java$nodejs$python$docker_context](bg:#1e1e2e)\
-$duration\
+$cmd_duration\
 [](fg:#1e1e2e bg:#11111b)\
 \n$character"""
 
@@ -105,8 +105,8 @@ disabled = false
 # ------------------------------------------------------------------------------
 # Metriche di Esecuzione
 # ------------------------------------------------------------------------------
-[duration]
-min_threshold = 1000
+[cmd_duration]
+min_time = 1000
 format = "[ took $duration ]($style)"
 style = "fg:#fab387 italic"
 
