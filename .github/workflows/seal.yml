@@ -223,10 +223,24 @@ jobs:
           sudo mkdir -p /mnt/rehearsal/root
           sudo losetup -fP /mnt/rehearsal/disk.raw
           loop="$(sudo losetup -j /mnt/rehearsal/disk.raw | cut -d: -f1)"
+
+sudo partprobe "$loop" || true
+sudo udevadm settle
+
+
+sudo partprobe "$loop" || true
+sudo udevadm settle
+
           esp="$(sudo lsblk -nrpo NAME,FSTYPE "$loop" | awk '$2=="vfat"{print $1; exit}')"
           root="$(sudo lsblk -nrpo NAME,FSTYPE "$loop" | awk '$2=="ext4"{print $1; exit}')"
           test -n "$esp" && test -n "$root"
-          uuid="$(sudo blkid -s PARTUUID -o value "$esp")"
+          echo "loop=$loop"
+sudo lsblk -nrpo NAME,FSTYPE,PARTUUID "$loop"
+sudo blkid "$esp" || true
+echo "loop=$loop"
+sudo lsblk -nrpo NAME,FSTYPE,PARTUUID "$loop"
+sudo blkid "$esp" || true
+uuid="$(sudo blkid -s PARTUUID -o value "$esp")"
           test -n "$uuid"
           sudo mount "$root" /mnt/rehearsal/root
           sudo sed -i "s|PARTUUID=210ebd50-ef82-4686-8cea-81d42a396772|PARTUUID=$uuid|" \
