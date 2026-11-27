@@ -1,9 +1,6 @@
 name: Build Custom OS
 
 on:
-  schedule:
-    - cron: "50 13 * * *"
-      timezone: "Europe/Rome"
   push:
     branches:
       - main

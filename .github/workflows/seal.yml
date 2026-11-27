@@ -217,6 +217,23 @@ jobs:
             bootc install to-disk --via-loopback --composefs-backend \
             --bootloader systemd --filesystem ext4 /data/disk.raw
 
+      - name: Allinea il PARTUUID dell'ESP nel rehearsal
+        run: |
+          set -euo pipefail
+          sudo mkdir -p /mnt/rehearsal/root
+          sudo losetup -fP /mnt/rehearsal/disk.raw
+          loop="$(sudo losetup -j /mnt/rehearsal/disk.raw | cut -d: -f1)"
+          esp="$(sudo lsblk -nrpo NAME,FSTYPE "$loop" | awk '$2=="vfat"{print $1; exit}')"
+          root="$(sudo lsblk -nrpo NAME,FSTYPE "$loop" | awk '$2=="ext4"{print $1; exit}')"
+          test -n "$esp" && test -n "$root"
+          uuid="$(sudo blkid -s PARTUUID -o value "$esp")"
+          test -n "$uuid"
+          sudo mount "$root" /mnt/rehearsal/root
+          sudo sed -i "s|PARTUUID=210ebd50-ef82-4686-8cea-81d42a396772|PARTUUID=$uuid|" \
+            /mnt/rehearsal/root/etc/fstab
+          sudo umount /mnt/rehearsal/root
+          sudo losetup -d "$loop"
+
       # SPERIMENTALE: avvia il disco appena installato (senza Secure Boot, LUKS e TPM).
       # Quando passa con regolarita', togli continue-on-error per renderlo bloccante.
       - name: Boot test QEMU (sperimentale)
