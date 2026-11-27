@@ -138,6 +138,7 @@ jobs:
           sbverify --cert "$RUNNER_TEMP/mok.crt" "$RUNNER_TEMP/sdboot.efi"
           objcopy -O binary --only-section=.cmdline "$RUNNER_TEMP/uki.efi" "$RUNNER_TEMP/cmdline.txt"
           echo "cmdline UKI: $(tr -d '\0' < "$RUNNER_TEMP/cmdline.txt")"
+          if grep -qE "composefs[.a-z0-9]*=[?]" "$RUNNER_TEMP/cmdline.txt"; then echo "ERRORE: fs-verity opzionale"; exit 1; fi
           for want in "composefs=" "rd.luks.options=tpm2-device=auto" "vconsole.keymap=it" "lockdown=integrity"; do
             grep -q -- "${want}" "$RUNNER_TEMP/cmdline.txt" \
               || { echo "ERRORE: la cmdline della UKI non contiene ${want}"; exit 1; }

@@ -1,9 +1,9 @@
 [Unit]
-Description=Staging periodico della nuova immagine
+Description=Controllo aggiornamenti: 15:00, con due nuovi tentativi
 
 [Timer]
-OnCalendar=*-*-* 00/4:00:00
-RandomizedDelaySec=30min
+OnCalendar=*-*-* 15,16,17:00:00 Europe/Rome
+RandomizedDelaySec=1min
 Persistent=true
 
 [Install]

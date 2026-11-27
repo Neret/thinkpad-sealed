@@ -444,7 +444,7 @@ echo " Controlla con: sudo bootc status (deve mostrare :sealed; se vedi un tag c
 echo " Primo avvio: passphrase LUKS."
 echo " Se compare MokManager: 'Enroll key from disk' -> EFI/BOOT/MOK.cer"
 echo " Dopo il primo avvio (con la MOK gia' registrata) registra il TPM con PIN:"
-echo "   sudo systemd-cryptenroll --wipe-slot=tpm2 --tpm2-device=auto --tpm2-pcrs=7 --tpm2-with-pin=yes $ROOT"
+echo "   sudo systemd-cryptenroll --wipe-slot=tpm2 --tpm2-device=auto --tpm2-pcrs=7+12 --tpm2-with-pin=yes $ROOT"
 echo "=================================================="
 
 lsblk -f "$DISK"

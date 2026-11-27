@@ -1,0 +1,31 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+marker="${STATE_DIRECTORY:-/var/lib/sealed-bootc-stage}/done"
+
+if (( $(TZ=Europe/Rome date +%-H) < 15 )); then
+  cycle="$(TZ=Europe/Rome date -d yesterday +%F)"
+else
+  cycle="$(TZ=Europe/Rome date +%F)"
+fi
+
+if [[ -f "$marker" && "$(<"$marker")" == "$cycle" ]]; then
+  echo "Aggiornamento gia' trovato in questo ciclo: nessun controllo."
+  exit 0
+fi
+
+staged_digest() {
+  bootc status --format=humanreadable |
+    awk '/Staged image:/ {s=1; next} s && /Digest:/ {print $2; s=0}'
+}
+
+before="$(staged_digest)"
+bootc upgrade
+after="$(staged_digest)"
+
+if [[ -n "$after" && "$after" != "$before" ]]; then
+  echo "$cycle" > "$marker"
+  echo "Nuovo aggiornamento preparato: $after"
+else
+  echo "Nessun nuovo aggiornamento."
+fi

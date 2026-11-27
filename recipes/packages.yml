@@ -146,7 +146,7 @@ install:
     # - gcc
     # - make
     # - gdb
-    # - mise (richiede un repository aggiuntivo o installazione separata)
+    # - mise 
 
     # ---------------------------------------------------------
     # Diagnostica hardware — host
@@ -156,7 +156,7 @@ install:
     - dmidecode
     - smartmontools
     - nvme-cli
-    - tcpdump
+    # - tcpdump
 
     # ---------------------------------------------------------
     # Fonts & Themes

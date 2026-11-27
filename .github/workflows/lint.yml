@@ -27,4 +27,4 @@ jobs:
             files/scripts/*.sh \
             files/system/usr/bin/sealed-*
       - name: actionlint
-        run: docker run --rm -v "$PWD:/repo:ro" -w /repo rhysd/actionlint@sha256:887a259a5a534f3c4f36cb02dca341673c6089431057242cdc931e9f133147e9 -color -shellcheck=
+        run: docker run --rm -v "$PWD:/repo:ro" -w /repo rhysd/actionlint@sha256:b1934ee5f1c509618f2508e6eb47ee0d3520686341fec936f3b79331f9315667 -color -shellcheck=
