@@ -5,3 +5,4 @@ Description=Aggiornamento dei Flatpak utente
 Type=oneshot
 ExecStartPre=-/usr/bin/nm-online -q -t 120
 ExecStart=/usr/bin/flatpak update --user --noninteractive
+ExecStart=/usr/bin/flatpak uninstall --user --unused --noninteractive

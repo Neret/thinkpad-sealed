@@ -41,7 +41,6 @@ modules:
         - power-profiles-daemon.service
         - systemd-boot-update.service
         - systemd-oomd.service
-        - sealed-bootc-stage.timer
       disabled:
         - NetworkManager-wait-online.service
     user:

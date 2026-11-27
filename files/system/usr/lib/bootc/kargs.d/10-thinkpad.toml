@@ -9,6 +9,8 @@ kargs = [
   "page_alloc.shuffle=1",
   "randomize_kstack_offset=on",
   "lockdown=integrity",
+  "rd.shell=0",
+  "rd.emergency=reboot",
   "rhgb",
   "quiet"
 ]

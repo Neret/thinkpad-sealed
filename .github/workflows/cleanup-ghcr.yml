@@ -4,27 +4,50 @@ on:
   schedule:
     - cron: "0 5 1 * *"
   workflow_dispatch:
+    inputs:
+      dry_run:
+        description: Simula soltanto, senza cancellare
+        type: boolean
+        default: true
 
 permissions:
   packages: write
 
+concurrency:
+  group: cleanup-ghcr
+  cancel-in-progress: false
+
 jobs:
   prune:
     runs-on: ubuntu-24.04
-    timeout-minutes: 10
+    timeout-minutes: 20
     steps:
-      - name: Prune OS image versions
-        uses: actions/delete-package-versions@e5bc658cc4c965c472efe991f8beea3981499c55 # v5
+      # Le ultime 10 immagini sealed-*, piu' quella con tag :sealed.
+      # Firme e attestazioni seguono la loro immagine.
+      - name: Prune sealed images
+        uses: dataaxiom/ghcr-cleanup-action@ac45a8c04b1eb4b27974ca79a0a74f344c93664b # v1.3.0
         with:
-          package-name: fedora-bootc-sealed-os
-          package-type: container
-          min-versions-to-keep: 30
-          delete-only-untagged-versions: true
+          package: fedora-bootc-sealed-os
+          delete-tags: "sealed-*"
+          keep-n-tagged: 5
+          exclude-tags: sealed,latest
+          dry-run: ${{ github.event_name == 'workflow_dispatch' && inputs.dry_run }}
 
-      - name: Prune base image versions
-        uses: actions/delete-package-versions@e5bc658cc4c965c472efe991f8beea3981499c55 # v5
+      # Le ultime 10 immagini BlueBuild non sigillate.
+      - name: Prune unsealed images
+        uses: dataaxiom/ghcr-cleanup-action@ac45a8c04b1eb4b27974ca79a0a74f344c93664b # v1.3.0
         with:
-          package-name: fedora-bootc-sealed-os-minimal-base
-          package-type: container
-          min-versions-to-keep: 5
-          delete-only-untagged-versions: true
+          package: fedora-bootc-sealed-os
+          keep-n-tagged: 10
+          exclude-tags: sealed,latest,sealed-*
+          delete-untagged: true
+          delete-orphaned-images: true
+          dry-run: ${{ github.event_name == 'workflow_dispatch' && inputs.dry_run }}
+
+      - name: Prune base images
+        uses: dataaxiom/ghcr-cleanup-action@ac45a8c04b1eb4b27974ca79a0a74f344c93664b # v1.3.0
+        with:
+          package: fedora-bootc-sealed-os-minimal-base
+          keep-n-untagged: 5
+          exclude-tags: "45"
+          dry-run: ${{ github.event_name == 'workflow_dispatch' && inputs.dry_run }}

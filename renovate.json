@@ -1,0 +1,25 @@
+{
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "extends": ["config:recommended", "helpers:pinGitHubActionDigests"],
+  "minimumReleaseAge": "7 days",
+  "customManagers": [
+    {
+      "customType": "regex",
+      "managerFilePatterns": ["/^\\.github/workflows/.+\\.yml$/"],
+      "matchStrings": ["(?<depName>quay\\.io/coreos/chunkah|rhysd/actionlint)@(?<currentDigest>sha256:[a-f0-9]{64})"],
+      "datasourceTemplate": "docker",
+      "currentValueTemplate": "latest"
+    }
+  ],
+  "packageRules": [
+    {
+      "description": "cosign va allineato a BlueBuild: aggiornare solo dopo controllo",
+      "matchPackageNames": ["sigstore/cosign"],
+      "dependencyDashboardApproval": true
+    },
+    {
+      "matchPackageNames": ["quay.io/coreos/chunkah", "rhysd/actionlint"],
+      "schedule": ["before 6am on the first day of the month"]
+    }
+  ]
+}

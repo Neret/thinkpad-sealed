@@ -3,10 +3,14 @@ name: Build Sealed Image
 on:
   workflow_dispatch:
   workflow_call:
+    inputs:
+      base_digest:
+        description: Digest dell'immagine prodotta dal job build
+        type: string
+        required: false
 
 permissions:
   contents: read
-  packages: write
 
 concurrency:
   group: build-sealed
@@ -17,10 +21,18 @@ env:
   CHUNKAH: quay.io/coreos/chunkah@sha256:71e593421c5de7dcc7c8c5c50e98d3bac572055a76f399f61a491d123c20a523
 
 jobs:
+  # Ha la chiave Secure Boot, NON la chiave cosign.
   seal:
+    name: Build sigillata
     runs-on: ubuntu-24.04
     environment: signing
     timeout-minutes: 120
+    permissions:
+      contents: read
+      packages: write
+    outputs:
+      tag: ${{ steps.push.outputs.tag }}
+      digest: ${{ steps.push.outputs.digest }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
@@ -36,9 +48,9 @@ jobs:
         run: echo "$GH_TOKEN" | sudo podman login ghcr.io -u "$GITHUB_ACTOR" --password-stdin
 
       - name: Install cosign
-        uses: sigstore/cosign-installer@398d4b0eeef1380460a10c8013a76f728fb906ac # v3
+        uses: sigstore/cosign-installer@881c63bd87e38389154debd8331404ce7ca8a3ab # v4.1.4
         with:
-          cosign-release: "v2.4.3"
+          cosign-release: "v3.1.4"
 
       - name: Login cosign
         env:
@@ -46,12 +58,15 @@ jobs:
         run: echo "$GH_TOKEN" | cosign login ghcr.io -u "$GITHUB_ACTOR" --password-stdin
 
       - name: Resolve pinned input images
+        env:
+          BASE_DIGEST: ${{ inputs.base_digest }}
         run: |
           set -euo pipefail
           sudo podman pull -q quay.io/fedora/fedora-bootc:45 >/dev/null
-          sudo podman pull -q "${IMAGE}:latest" >/dev/null
+          # Dal job build arriva il digest esatto; a mano si usa :latest.
+          base_digest="${BASE_DIGEST:-$(skopeo inspect --format '{{.Digest}}' "docker://${IMAGE}:latest")}"
+          sudo podman pull -q "${IMAGE}@${base_digest}" >/dev/null
           tools_digest="$(sudo podman image inspect --format '{{.Digest}}' quay.io/fedora/fedora-bootc:45)"
-          base_digest="$(sudo podman image inspect --format '{{.Digest}}' "${IMAGE}:latest")"
           test -n "${tools_digest}" && test -n "${base_digest}"
           cosign verify --key cosign.pub "${IMAGE}@${base_digest}" >/dev/null
           {
@@ -139,20 +154,10 @@ jobs:
           objcopy -O binary --only-section=.cmdline "$RUNNER_TEMP/uki.efi" "$RUNNER_TEMP/cmdline.txt"
           echo "cmdline UKI: $(tr -d '\0' < "$RUNNER_TEMP/cmdline.txt")"
           if grep -qE "composefs[.a-z0-9]*=[?]" "$RUNNER_TEMP/cmdline.txt"; then echo "ERRORE: fs-verity opzionale"; exit 1; fi
-          for want in "composefs=" "rd.luks.options=tpm2-device=auto" "vconsole.keymap=it" "lockdown=integrity"; do
+          for want in "composefs=" "rd.luks.options=tpm2-device=auto" "vconsole.keymap=it" "lockdown=integrity" "rd.shell=0" "rd.emergency=reboot"; do
             grep -q -- "${want}" "$RUNNER_TEMP/cmdline.txt" \
               || { echo "ERRORE: la cmdline della UKI non contiene ${want}"; exit 1; }
           done
-
-      - name: Chunk unsealed image
-        run: |
-          set -euo pipefail
-          config="$(sudo podman inspect "localhost/unsealed:${TAG}")"
-          sudo podman run --rm --network none --security-opt label=disable \
-            --mount "type=image,src=localhost/unsealed:${TAG},destination=/chunkah" \
-            -e CHUNKAH_CONFIG_STR="${config}" \
-            "${CHUNKAH}" build --max-layers 64 -t "localhost/chunked:${TAG}" \
-            | sudo podman load
           state="$(sudo podman run --rm "${IMAGE}:${TAG}" systemctl --root=/ is-enabled systemd-boot-update.service || true)"
           echo "systemd-boot-update.service: ${state}"
           case "${state}" in
@@ -166,6 +171,40 @@ jobs:
             echo "- systemd-boot-update: ${state}"
           } >> "$GITHUB_STEP_SUMMARY"
 
+      - name: Push sealed image (tag con timestamp, non ancora firmato)
+        id: push
+        run: |
+          set -euo pipefail
+          sudo podman push --digestfile "$RUNNER_TEMP/digest" "${IMAGE}:${TAG}"
+          {
+            echo "tag=${TAG}"
+            echo "digest=$(cat "$RUNNER_TEMP/digest")"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Remove signing files
+        if: always()
+        run: shred -u "$RUNNER_TEMP/mok.key" "$RUNNER_TEMP/mok.crt" 2>/dev/null || true
+
+  # Container privilegiato su un runner separato, senza alcun segreto di firma.
+  rehearsal:
+    name: Rehearsal installazione
+    needs: seal
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    permissions:
+      contents: read
+      packages: read
+    env:
+      DIGEST: ${{ needs.seal.outputs.digest }}
+    steps:
+      - name: Free disk space
+        run: sudo rm -rf /usr/share/dotnet /opt/ghc /usr/local/lib/android /opt/hostedtoolcache
+
+      - name: Registry login
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: echo "$GH_TOKEN" | sudo podman login ghcr.io -u "$GITHUB_ACTOR" --password-stdin
+
       - name: Rehearsal - bootc install su disco loopback
         run: |
           sudo mkdir -p /mnt/rehearsal
@@ -174,39 +213,157 @@ jobs:
             -v /dev:/dev \
             -v /var/lib/containers:/var/lib/containers \
             -v /mnt/rehearsal:/data \
-            "${IMAGE}:${TAG}" \
+            "${IMAGE}@${DIGEST}" \
             bootc install to-disk --via-loopback --composefs-backend \
             --bootloader systemd --filesystem ext4 /data/disk.raw
 
-      - name: Push sealed image (tag con timestamp)
+      # SPERIMENTALE: avvia il disco appena installato (senza Secure Boot, LUKS e TPM).
+      # Quando passa con regolarita', togli continue-on-error per renderlo bloccante.
+      - name: Boot test QEMU (sperimentale)
+        id: boot
+        timeout-minutes: 15
         run: |
           set -euo pipefail
-          sudo podman push --digestfile "$RUNNER_TEMP/digest" "${IMAGE}:${TAG}"
-          echo "DIGEST=$(cat "$RUNNER_TEMP/digest")" >> "$GITHUB_ENV"
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq qemu-system-x86 ovmf
+          unit="$(printf '%s\n' '[Unit]' 'After=multi-user.target' '[Service]' 'Type=oneshot' \
+            "ExecStart=/bin/sh -c 'echo SEALED_BOOT_OK >/dev/ttyS0; systemctl --failed --no-legend >/dev/ttyS0'" | base64 -w0)"
+          dropin="$(printf '%s\n' '[Unit]' 'Wants=boot-ok.service' | base64 -w0)"
+          cp /usr/share/OVMF/OVMF_VARS_4M.fd "$RUNNER_TEMP/vars.fd"
+          log="$RUNNER_TEMP/serial.log"; : > "$log"
+          sudo qemu-system-x86_64 -machine q35,accel=kvm -cpu host -m 4096 -smp 2 \
+            -drive if=pflash,format=raw,readonly=on,file=/usr/share/OVMF/OVMF_CODE_4M.fd \
+            -drive "if=pflash,format=raw,file=$RUNNER_TEMP/vars.fd" \
+            -drive if=virtio,format=raw,file=/mnt/rehearsal/disk.raw \
+            -smbios "type=11,value=io.systemd.credential.binary:systemd.extra-unit.boot-ok.service=${unit}" \
+            -smbios "type=11,value=io.systemd.credential.binary:systemd.unit-dropin.multi-user.target=${dropin}" \
+            -display none -no-reboot -serial "file:$log" &
+          qpid=$!
+          ok=0
+          for _ in $(seq 120); do
+            if sudo grep -q SEALED_BOOT_OK "$log"; then ok=1; sleep 5; break; fi
+            kill -0 "$qpid" 2>/dev/null || break
+            sleep 5
+          done
+          sudo pkill -f qemu-system-x86_64 || true
+          sudo tail -n 60 "$log"
+          test "$ok" = 1
 
+      - name: Esito boot test
+        if: always()
+        run: echo "Boot test QEMU - ${{ steps.boot.outcome }}" >> "$GITHUB_STEP_SUMMARY"
+
+  # Elenco dei pacchetti, su un runner separato e senza chiavi.
+  sbom:
+    name: SBOM
+    needs: [seal, rehearsal]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    permissions:
+      packages: read
+    steps:
+      - name: Free disk space
+        run: sudo rm -rf /usr/share/dotnet /opt/ghc /usr/local/lib/android /opt/hostedtoolcache
+
+      - name: Generate SBOM
+        uses: anchore/sbom-action@dfcb83b97731532d72be422cbc51ee64adb6fd56 # v0.24.4
+        env:
+          # Senza l'elenco dei singoli file, per restare sotto il limite di 16 MB.
+          SYFT_FILE_METADATA_SELECTION: none
+        with:
+          image: ${{ env.IMAGE }}@${{ needs.seal.outputs.digest }}
+          registry-username: ${{ github.actor }}
+          registry-password: ${{ github.token }}
+          format: spdx-json
+          output-file: sbom.spdx.json
+          upload-artifact: false
+
+      - name: Check SBOM size
+        run: test "$(stat -c %s sbom.spdx.json)" -lt 16000000
+
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: sbom
+          path: sbom.spdx.json
+          retention-days: 30
+
+  # Ha la chiave cosign: non esegue mai l'immagine.
+  # Un SBOM fallito non blocca l'aggiornamento; un rehearsal fallito si'.
+  publish:
+    name: Firma e pubblicazione
+    needs: [seal, rehearsal, sbom]
+    if: ${{ !cancelled() && always() && needs.seal.result == 'success' && needs.rehearsal.result == 'success' }}
+    runs-on: ubuntu-24.04
+    environment: signing
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      packages: write
+      id-token: write
+      attestations: write
+    env:
+      DIGEST: ${{ needs.seal.outputs.digest }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Install cosign
+        uses: sigstore/cosign-installer@881c63bd87e38389154debd8331404ce7ca8a3ab # v4.1.4
+        with:
+          cosign-release: "v3.1.4"
+
+      - name: Login registry
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          echo "$GH_TOKEN" | cosign login ghcr.io -u "$GITHUB_ACTOR" --password-stdin
+          echo "$GH_TOKEN" | docker login ghcr.io -u "$GITHUB_ACTOR" --password-stdin
+          echo "$GH_TOKEN" | skopeo login ghcr.io -u "$GITHUB_ACTOR" --password-stdin
 
       - name: Sign sealed image
         env:
           COSIGN_PRIVATE_KEY: ${{ secrets.SIGNING_SECRET }}
           COSIGN_PASSWORD: ""
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -euo pipefail
-          cosign sign --yes --key env://COSIGN_PRIVATE_KEY "${IMAGE}@${DIGEST}"
+          # Formato legacy (.sig), lo stesso usato da BlueBuild e letto tramite
+          # use-sigstore-attachments da bootc/containers-image.
+          cosign sign --yes --new-bundle-format=false --use-signing-config=false \
+            --key env://COSIGN_PRIVATE_KEY "${IMAGE}@${DIGEST}"
           cosign verify --key cosign.pub "${IMAGE}@${DIGEST}" >/dev/null
+
+      - name: Attest provenance
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
+        with:
+          subject-name: ${{ env.IMAGE }}
+          subject-digest: ${{ env.DIGEST }}
+          push-to-registry: true
+          create-storage-record: false
+
+      - name: Download SBOM
+        if: needs.sbom.result == 'success'
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: sbom
+
+      - name: Attest SBOM
+        if: needs.sbom.result == 'success'
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
+        with:
+          subject-name: ${{ env.IMAGE }}
+          subject-digest: ${{ env.DIGEST }}
+          sbom-path: sbom.spdx.json
+          push-to-registry: true
+          create-storage-record: false
 
       - name: Publish sealed tag
         run: |
           set -euo pipefail
-          sudo skopeo copy --preserve-digests "docker://${IMAGE}@${DIGEST}" "docker://${IMAGE}:sealed"
-
-      - name: Remove signing keys
-        if: always()
-        run: shred -u "$RUNNER_TEMP/mok.key" "$RUNNER_TEMP/mok.crt" || true
+          skopeo copy --preserve-digests "docker://${IMAGE}@${DIGEST}" "docker://${IMAGE}:sealed"
 
       - name: Verify published tag
         run: |
           set -euo pipefail
           cosign verify --key cosign.pub "${IMAGE}:sealed" >/dev/null
-          published="$(sudo skopeo inspect --format "{{.Digest}}" "docker://${IMAGE}:sealed")"
+          published="$(skopeo inspect --format '{{.Digest}}' "docker://${IMAGE}:sealed")"
           test "${published}" = "${DIGEST}"

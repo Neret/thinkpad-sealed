@@ -108,6 +108,36 @@ fi
 IMAGE="${repo}@${digest}"
 cosign verify --key "$COSIGN_PUB" "$IMAGE" >/dev/null || die "verifica cosign fallita: $IMAGE"
 
+# Controlli sul contenuto dell'immagine prima di toccare il disco. La scratch non
+# esiste ancora, quindi serve un tmpfs: solo con abbastanza RAM. L'immagine viene
+# poi riscaricata. I controlli successivi restano comunque attivi.
+precheck_image() {
+  local avail_kb tmp f
+  avail_kb="$(awk '/^MemAvailable:/ {print $2}' /proc/meminfo)"
+  if (( avail_kb < 20*1024*1024 )) || mountpoint -q /var/lib/containers; then
+    warn "controllo preliminare saltato (servono 20 GiB di RAM disponibile)"
+    return 0
+  fi
+  mkdir -p /var/lib/containers
+  mount -t tmpfs -o size=16G tmpfs /var/lib/containers
+  command -v restorecon >/dev/null 2>&1 && restorecon -R /var/lib/containers 2>/dev/null || true
+  podman pull -q "$IMAGE" >/dev/null || die "pull preliminare fallito: disco non toccato"
+  tmp="$(mktemp -d /run/precheck.XXXXXX)"
+  podman run --rm --security-opt label=disable -v "$tmp":/stage "$IMAGE" sh -ec '
+    cp /usr/lib/systemd/boot/efi/systemd-bootx64.efi /stage/sdboot.efi
+    cp /boot/EFI/Linux/*.efi /stage/
+    cp /etc/fstab /stage/fstab
+  ' || die "file di boot mancanti nell'immagine: disco non toccato"
+  for f in "$tmp"/*.efi; do require_signed "$f"; done
+  grep -qi "PARTUUID=${ESP_PARTUUID}" "$tmp/fstab" \
+    || die "ESP_PARTUUID assente nell'fstab dell'immagine: disco non toccato"
+  rm -rf "$tmp"
+  podman system reset -f >/dev/null 2>&1 || true
+  umount /var/lib/containers || die "impossibile smontare il tmpfs del controllo preliminare"
+  echo "OK: controllo preliminare superato"
+}
+precheck_image
+
 # ---------------- 2. CONFERMA E PASSPHRASE ----------------
 log "[2/11] Conferma"
 lsblk -o NAME,SIZE,TYPE,FSTYPE,MODEL "$DISK"
@@ -379,6 +409,9 @@ if mokutil --sb-state 2>/dev/null | grep -qi 'enabled'; then
   else
     warn "MOK_CER non indicato: se la chiave non e' registrata, shim aprira' MokManager."
   fi
+else
+  warn "Secure Boot disattivato o stato non leggibile: MOK NON importata."
+  warn "Prima di riattivarlo registra la chiave: sudo mokutil --import $MOK_CER"
 fi
 
 # ---------------- 11. SCRATCH -> ROOT ----------------

@@ -1,9 +1,0 @@
-[Unit]
-Description=Prepara la prossima immagine (bootc upgrade, senza riavvio)
-ConditionACPower=true
-
-[Service]
-Type=oneshot
-StateDirectory=sealed-bootc-stage
-ExecStartPre=-/usr/bin/nm-online -q -t 120
-ExecStart=/usr/bin/sealed-bootc-stage
