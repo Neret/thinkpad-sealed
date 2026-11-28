@@ -22,7 +22,7 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     steps:
-      # Le ultime 10 immagini sealed-*, piu' quella con tag :sealed.
+      # Le ultime 5 immagini sealed-*, piu' quella con tag :sealed.
       # Firme e attestazioni seguono la loro immagine.
       - name: Prune sealed images
         uses: dataaxiom/ghcr-cleanup-action@ac45a8c04b1eb4b27974ca79a0a74f344c93664b # v1.3.0

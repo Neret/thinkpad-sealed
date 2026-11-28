@@ -220,38 +220,24 @@ jobs:
       - name: Allinea il PARTUUID dell'ESP nel rehearsal
         run: |
           set -euo pipefail
-          sudo mkdir -p /mnt/rehearsal/root
-          sudo losetup -fP /mnt/rehearsal/disk.raw
-          loop="$(sudo losetup -j /mnt/rehearsal/disk.raw | cut -d: -f1)"
-
-sudo partprobe "$loop" || true
-sudo udevadm settle
-
-
-sudo partprobe "$loop" || true
-sudo udevadm settle
-
-          esp="$(sudo lsblk -nrpo NAME,FSTYPE "$loop" | awk '$2=="vfat"{print $1; exit}')"
-          root="$(sudo lsblk -nrpo NAME,FSTYPE "$loop" | awk '$2=="ext4"{print $1; exit}')"
-          test -n "$esp" && test -n "$root"
-          echo "loop=$loop"
-sudo lsblk -nrpo NAME,FSTYPE,PARTUUID "$loop"
-sudo blkid "$esp" || true
-echo "loop=$loop"
-sudo lsblk -nrpo NAME,FSTYPE,PARTUUID "$loop"
-sudo blkid "$esp" || true
-uuid="$(sudo blkid -s PARTUUID -o value "$esp")"
-          test -n "$uuid"
-          sudo mount "$root" /mnt/rehearsal/root
-          sudo sed -i "s|PARTUUID=210ebd50-ef82-4686-8cea-81d42a396772|PARTUUID=$uuid|" \
-            /mnt/rehearsal/root/etc/fstab
-          sudo umount /mnt/rehearsal/root
-          sudo losetup -d "$loop"
+          img=/mnt/rehearsal/disk.raw
+          want=210ebd50-ef82-4686-8cea-81d42a396772
+          # Cambia il GUID dell'ESP sul disco di prova: niente loop, mount
+          # o modifiche all'fstab dentro il layout composefs.
+          table="$(sudo sfdisk --json "$img")"
+          num="$(jq -er '[.partitiontable.partitions[]
+            | select((.type | ascii_upcase) == "C12A7328-F81F-11D2-BA4B-00A0C93EC93B")]
+            | if length == 1 then .[0].node else error("attesa una sola ESP") end
+            | capture("(?<n>[0-9]+)$").n' <<<"$table")"
+          sudo sfdisk --part-uuid "$img" "$num" "$want"
+          got="$(sudo sfdisk --part-uuid "$img" "$num")"
+          test "${got,,}" = "$want"
 
       # SPERIMENTALE: avvia il disco appena installato (senza Secure Boot, LUKS e TPM).
       # Quando passa con regolarita', togli continue-on-error per renderlo bloccante.
       - name: Boot test QEMU (sperimentale)
         id: boot
+        continue-on-error: false
         timeout-minutes: 15
         run: |
           set -euo pipefail
@@ -268,6 +254,7 @@ uuid="$(sudo blkid -s PARTUUID -o value "$esp")"
             -drive if=virtio,format=raw,file=/mnt/rehearsal/disk.raw \
             -smbios "type=11,value=io.systemd.credential.binary:systemd.extra-unit.boot-ok.service=${unit}" \
             -smbios "type=11,value=io.systemd.credential.binary:systemd.unit-dropin.multi-user.target=${dropin}" \
+            -smbios "type=11,value=io.systemd.stub.kernel-cmdline-extra=console=ttyS0" \
             -display none -no-reboot -serial "file:$log" &
           qpid=$!
           ok=0

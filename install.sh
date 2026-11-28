@@ -78,9 +78,10 @@ require_signed() {
 }
 
 require_signed_shim() {
-  if sbverify --list "$1" 2>&1 | grep -q 'No signature table'; then
-    die "shim non firmato: $1"
-  fi
+  local out
+  out="$(LC_ALL=C sbverify --list "$1" 2>&1 || true)"
+  grep -q 'image signature issuers' <<<"$out" \
+    || die "shim non firmato o firme illeggibili: $1"
 }
 
 # ---------------- 1. PREREQUISITI ----------------
@@ -88,7 +89,7 @@ log "[1/11] Prerequisiti"
 [[ -d /sys/firmware/efi/efivars ]] || die "la live non e' avviata in UEFI"
 grep -qw rd.live.image /proc/cmdline || die "eseguire solo da una live Fedora"
 dnf install -y --setopt=install_weak_deps=False \
-  podman cryptsetup gdisk dosfstools e2fsprogs efibootmgr sbsigntools mokutil util-linux openssl skopeo cosign
+  podman cryptsetup gdisk dosfstools e2fsprogs efibootmgr sbsigntools mokutil util-linux parted openssl skopeo cosign
 
 [[ -r "$MOK_CRT" ]] || die "MOK_CRT obbligatorio e leggibile (certificato PEM con cui sono firmati sd-boot e UKI)"
 [[ -r "$MOK_CER" ]] || die "MOK_CER obbligatorio e leggibile (certificato DER da registrare nel firmware)"
@@ -146,8 +147,8 @@ if [[ "$ASSUME_YES" != 1 ]]; then
   [[ "$ans" == "cancella" ]] || die "annullato"
 fi
 
-read -rsp "Nuova passphrase LUKS: " P1; echo
-read -rsp "Ripeti passphrase: " P2; echo
+IFS= read -rsp "Nuova passphrase LUKS: " P1; echo
+IFS= read -rsp "Ripeti passphrase: " P2; echo
 [[ -n "$P1" && "$P1" == "$P2" ]] || die "passphrase vuote o diverse"
 
 KEYFILE="$(mktemp /dev/shm/luks.XXXXXX)"
@@ -442,6 +443,12 @@ grow_root() {
 
   partprobe "$DISK" || true
   udevadm settle
+
+  # Se il kernel usa ancora la vecchia tabella, il resize non allarga nulla.
+  if [[ -b "$SCRATCH" ]]; then
+    echo "tabella gia' aggiornata ma non riletta: dopo il riavvio esegui cryptsetup resize e resize2fs" >&2
+    return 1
+  fi
 
   cryptsetup open --key-file "$KEYFILE" "$ROOT" "$LUKS_NAME" || return 1
   cryptsetup resize --key-file "$KEYFILE" "$LUKS_NAME" || return 1
