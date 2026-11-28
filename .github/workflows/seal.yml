@@ -21,7 +21,6 @@ env:
   CHUNKAH: quay.io/coreos/chunkah@sha256:71e593421c5de7dcc7c8c5c50e98d3bac572055a76f399f61a491d123c20a523
 
 jobs:
-  # Ha la chiave Secure Boot, NON la chiave cosign.
   seal:
     name: Build sigillata
     runs-on: ubuntu-24.04
@@ -34,7 +33,7 @@ jobs:
       tag: ${{ steps.push.outputs.tag }}
       digest: ${{ steps.push.outputs.digest }}
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 
 
       - name: Free disk space
         run: sudo rm -rf /usr/share/dotnet /opt/ghc /usr/local/lib/android /opt/hostedtoolcache
@@ -48,7 +47,7 @@ jobs:
         run: echo "$GH_TOKEN" | sudo podman login ghcr.io -u "$GITHUB_ACTOR" --password-stdin
 
       - name: Install cosign
-        uses: sigstore/cosign-installer@881c63bd87e38389154debd8331404ce7ca8a3ab # v4.1.4
+        uses: sigstore/cosign-installer@881c63bd87e38389154debd8331404ce7ca8a3ab 
         with:
           cosign-release: "v3.1.4"
 
@@ -63,7 +62,6 @@ jobs:
         run: |
           set -euo pipefail
           sudo podman pull -q quay.io/fedora/fedora-bootc:45 >/dev/null
-          # Dal job build arriva il digest esatto; a mano si usa :latest.
           base_digest="${BASE_DIGEST:-$(skopeo inspect --format '{{.Digest}}' "docker://${IMAGE}:latest")}"
           sudo podman pull -q "${IMAGE}@${base_digest}" >/dev/null
           tools_digest="$(sudo podman image inspect --format '{{.Digest}}' quay.io/fedora/fedora-bootc:45)"
@@ -185,7 +183,6 @@ jobs:
         if: always()
         run: shred -u "$RUNNER_TEMP/mok.key" "$RUNNER_TEMP/mok.crt" 2>/dev/null || true
 
-  # Container privilegiato su un runner separato, senza alcun segreto di firma.
   rehearsal:
     name: Rehearsal installazione
     needs: seal
@@ -222,8 +219,6 @@ jobs:
           set -euo pipefail
           img=/mnt/rehearsal/disk.raw
           want=210ebd50-ef82-4686-8cea-81d42a396772
-          # Cambia il GUID dell'ESP sul disco di prova: niente loop, mount
-          # o modifiche all'fstab dentro il layout composefs.
           table="$(sudo sfdisk --json "$img")"
           num="$(jq -er '[.partitiontable.partitions[]
             | select((.type | ascii_upcase) == "C12A7328-F81F-11D2-BA4B-00A0C93EC93B")]
@@ -233,18 +228,15 @@ jobs:
           got="$(sudo sfdisk --part-uuid "$img" "$num")"
           test "${got,,}" = "$want"
 
-      # SPERIMENTALE: avvia il disco appena installato (senza Secure Boot, LUKS e TPM).
-      # Quando passa con regolarita', togli continue-on-error per renderlo bloccante.
-      - name: Boot test QEMU (sperimentale)
+      - name: Boot test QEMU
         id: boot
-        continue-on-error: false
         timeout-minutes: 15
         run: |
           set -euo pipefail
           sudo apt-get update -qq
           sudo apt-get install -y -qq qemu-system-x86 ovmf
           unit="$(printf '%s\n' '[Unit]' 'After=multi-user.target' '[Service]' 'Type=oneshot' \
-            "ExecStart=/bin/sh -c 'echo SEALED_BOOT_OK >/dev/ttyS0; systemctl --failed --no-legend >/dev/ttyS0'" | base64 -w0)"
+            "ExecStart=/bin/sh -c 'systemctl --failed --no-legend >/dev/ttyS0; ls /efi/EFI >/dev/null && findmnt -n -t vfat /efi >/dev/ttyS0 && echo SEALED_BOOT_OK >/dev/ttyS0'" | base64 -w0)"
           dropin="$(printf '%s\n' '[Unit]' 'Wants=boot-ok.service' | base64 -w0)"
           cp /usr/share/OVMF/OVMF_VARS_4M.fd "$RUNNER_TEMP/vars.fd"
           log="$RUNNER_TEMP/serial.log"; : > "$log"
@@ -271,7 +263,6 @@ jobs:
         if: always()
         run: echo "Boot test QEMU - ${{ steps.boot.outcome }}" >> "$GITHUB_STEP_SUMMARY"
 
-  # Elenco dei pacchetti, su un runner separato e senza chiavi.
   sbom:
     name: SBOM
     needs: [seal, rehearsal]
@@ -284,9 +275,8 @@ jobs:
         run: sudo rm -rf /usr/share/dotnet /opt/ghc /usr/local/lib/android /opt/hostedtoolcache
 
       - name: Generate SBOM
-        uses: anchore/sbom-action@dfcb83b97731532d72be422cbc51ee64adb6fd56 # v0.24.4
+        uses: anchore/sbom-action@dfcb83b97731532d72be422cbc51ee64adb6fd56 
         env:
-          # Senza l'elenco dei singoli file, per restare sotto il limite di 16 MB.
           SYFT_FILE_METADATA_SELECTION: none
         with:
           image: ${{ env.IMAGE }}@${{ needs.seal.outputs.digest }}
@@ -300,7 +290,6 @@ jobs:
         run: |
           set -euo pipefail
           echo "SBOM originale: $(stat -c %s sbom.spdx.json) byte"
-          # Via file, relative relazioni e riferimenti diversi da purl.
           jq -c '
             ([.files[]?.SPDXID] | map({(.): true}) | add // {}) as $f
             | del(.files)
@@ -320,18 +309,16 @@ jobs:
             exit 1
           fi
 
-      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 
         with:
           name: sbom
           path: sbom.spdx.json
           retention-days: 30
 
-  # Ha la chiave cosign: non esegue mai l'immagine.
-  # Un SBOM fallito non blocca l'aggiornamento; un rehearsal fallito si'.
   publish:
     name: Firma e pubblicazione
     needs: [seal, rehearsal, sbom]
-    if: ${{ !cancelled() && always() && needs.seal.result == 'success' && needs.rehearsal.result == 'success' }}
+    if: ${{ !cancelled() && needs.seal.result == 'success' && needs.rehearsal.result == 'success' }}
     runs-on: ubuntu-24.04
     environment: signing
     timeout-minutes: 30
@@ -343,10 +330,10 @@ jobs:
     env:
       DIGEST: ${{ needs.seal.outputs.digest }}
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 
 
       - name: Install cosign
-        uses: sigstore/cosign-installer@881c63bd87e38389154debd8331404ce7ca8a3ab # v4.1.4
+        uses: sigstore/cosign-installer@881c63bd87e38389154debd8331404ce7ca8a3ab 
         with:
           cosign-release: "v3.1.4"
 
@@ -365,14 +352,12 @@ jobs:
           COSIGN_PASSWORD: ""
         run: |
           set -euo pipefail
-          # Formato legacy (.sig), lo stesso usato da BlueBuild e letto tramite
-          # use-sigstore-attachments da bootc/containers-image.
           cosign sign --yes --new-bundle-format=false --use-signing-config=false \
             --key env://COSIGN_PRIVATE_KEY "${IMAGE}@${DIGEST}"
           cosign verify --new-bundle-format=false --key cosign.pub "${IMAGE}@${DIGEST}" >/dev/null
 
       - name: Attest provenance
-        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 
         with:
           subject-name: ${{ env.IMAGE }}
           subject-digest: ${{ env.DIGEST }}
@@ -381,13 +366,15 @@ jobs:
 
       - name: Download SBOM
         if: needs.sbom.result == 'success'
-        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        continue-on-error: true
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 
         with:
           name: sbom
 
       - name: Attest SBOM
         if: needs.sbom.result == 'success'
-        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
+        continue-on-error: true
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 
         with:
           subject-name: ${{ env.IMAGE }}
           subject-digest: ${{ env.DIGEST }}

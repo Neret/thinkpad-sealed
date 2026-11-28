@@ -28,7 +28,6 @@ jobs:
   build:
     name: Base e immagine
     needs: lint
-    # rpm-ostree's bubblewrapped systemd-sysusers fails to read /etc/gshadow on Ubuntu 26.04.
     runs-on: ubuntu-24.04
     environment: signing
     timeout-minutes: 60

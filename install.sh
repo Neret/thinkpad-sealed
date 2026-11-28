@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# install-sealed.sh - installazione pulita da live CD Fedora (UEFI)
+# install.sh - installazione pulita da live CD Fedora (UEFI)
 #
 # Usa una partizione SCRATCH temporanea a fine disco (non la RAM) per lo storage
 # di podman. A fine installazione la elimina e la riassorbe nella root.
@@ -9,7 +9,7 @@
 # Uso, con la chiavetta contenente MOK.cer (DER) e MOK.crt (PEM) montata:
 #   MOK_CER=/run/media/liveuser/USB/MOK.cer \
 #   MOK_CRT=/run/media/liveuser/USB/MOK.crt \
-#   bash install-sealed.sh
+#   bash install.sh
 set -euo pipefail
 [[ $EUID -eq 0 ]] || exec sudo -E bash "$0" "$@"
 
