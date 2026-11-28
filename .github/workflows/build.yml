@@ -11,12 +11,11 @@ on:
       - "cosign.pub"
       - ".github/workflows/build.yml"
       - ".github/workflows/seal.yml"
-      - ".github/workflows/lint.yml"
   workflow_dispatch:
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: false
+  cancel-in-progress: true
 
 jobs:
   lint:
