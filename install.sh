@@ -107,7 +107,13 @@ else
   digest="$(skopeo inspect --format '{{.Digest}}' "docker://$IMAGE")" || die "digest non risolto: $IMAGE"
 fi
 IMAGE="${repo}@${digest}"
-cosign verify --key "$COSIGN_PUB" "$IMAGE" >/dev/null || die "verifica cosign fallita: $IMAGE"
+# Verifica la firma legacy (.sig), non i bundle delle attestazioni GitHub.
+cosign_args=(--key "$COSIGN_PUB")
+cosign_help="$(cosign verify --help 2>&1)"
+if grep -q -- '--new-bundle-format' <<<"$cosign_help"; then
+  cosign_args+=(--new-bundle-format=false)
+fi
+cosign verify "${cosign_args[@]}" "$IMAGE" >/dev/null || die "verifica cosign fallita: $IMAGE"
 
 # Controlli sul contenuto dell'immagine prima di toccare il disco. La scratch non
 # esiste ancora, quindi serve un tmpfs: solo con abbastanza RAM. L'immagine viene

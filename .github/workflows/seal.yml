@@ -296,8 +296,29 @@ jobs:
           output-file: sbom.spdx.json
           upload-artifact: false
 
-      - name: Check SBOM size
-        run: test "$(stat -c %s sbom.spdx.json)" -lt 16000000
+      - name: Riduci e controlla SBOM
+        run: |
+          set -euo pipefail
+          echo "SBOM originale: $(stat -c %s sbom.spdx.json) byte"
+          # Via file, relative relazioni e riferimenti diversi da purl.
+          jq -c '
+            ([.files[]?.SPDXID] | map({(.): true}) | add // {}) as $f
+            | del(.files)
+            | .packages |= map(
+                del(.hasFiles)
+                | if has("externalRefs")
+                  then .externalRefs |= map(select(.referenceType == "purl"))
+                  else . end)
+            | .relationships |= map(select(
+                ($f[.spdxElementId] or $f[.relatedSpdxElement]) | not))
+          ' sbom.spdx.json > sbom.min.json
+          mv sbom.min.json sbom.spdx.json
+          size="$(stat -c %s sbom.spdx.json)"
+          echo "SBOM ridotto: ${size} byte"
+          if (( size >= 16000000 )); then
+            echo "ERRORE: SBOM ancora troppo grande"
+            exit 1
+          fi
 
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
@@ -348,7 +369,7 @@ jobs:
           # use-sigstore-attachments da bootc/containers-image.
           cosign sign --yes --new-bundle-format=false --use-signing-config=false \
             --key env://COSIGN_PRIVATE_KEY "${IMAGE}@${DIGEST}"
-          cosign verify --key cosign.pub "${IMAGE}@${DIGEST}" >/dev/null
+          cosign verify --new-bundle-format=false --key cosign.pub "${IMAGE}@${DIGEST}" >/dev/null
 
       - name: Attest provenance
         uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
@@ -382,6 +403,6 @@ jobs:
       - name: Verify published tag
         run: |
           set -euo pipefail
-          cosign verify --key cosign.pub "${IMAGE}:sealed" >/dev/null
+          cosign verify --new-bundle-format=false --key cosign.pub "${IMAGE}:sealed" >/dev/null
           published="$(skopeo inspect --format '{{.Digest}}' "docker://${IMAGE}:sealed")"
           test "${published}" = "${DIGEST}"
